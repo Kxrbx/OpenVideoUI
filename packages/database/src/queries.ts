@@ -5,8 +5,8 @@ import type {
   OpenRouterVideoGenerationStatus,
   OpenRouterVideoGenerationSubmission,
   OpenRouterVideoModel
-} from "@creative-studio/openrouter";
-import { createOpenRouterClient } from "@creative-studio/openrouter";
+} from "@openvideoui/openrouter";
+import { createOpenRouterClient } from "@openvideoui/openrouter";
 import { getDatabaseClient } from "./client";
 import {
   type NewRenderEvent,

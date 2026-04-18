@@ -1,7 +1,7 @@
 services:
   postgres:
     image: postgres:16-alpine
-    container_name: creative-studio-postgres
+    container_name: openvideoui-postgres
     environment:
       POSTGRES_DB: studio
       POSTGRES_USER: studio
@@ -13,7 +13,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    container_name: creative-studio-redis
+    container_name: openvideoui-redis
     ports:
       - "6379:6379"
     volumes:
@@ -23,7 +23,7 @@ services:
     build:
       context: .
       dockerfile: apps/web/Dockerfile
-    container_name: creative-studio-web
+    container_name: openvideoui-web
     env_file:
       - .env
     environment:
@@ -39,13 +39,13 @@ services:
       - .:/app
       - web_node_modules:/app/node_modules
       - web_next:/app/apps/web/.next
-    command: npm run dev --workspace @creative-studio/web
+    command: npm run dev --workspace @openvideoui/web
 
   worker:
     build:
       context: .
       dockerfile: apps/worker/Dockerfile
-    container_name: creative-studio-worker
+    container_name: openvideoui-worker
     env_file:
       - .env
     environment:
@@ -57,7 +57,7 @@ services:
     volumes:
       - .:/app
       - worker_node_modules:/app/node_modules
-    command: npm run dev --workspace @creative-studio/worker
+    command: npm run dev --workspace @openvideoui/worker
 
 volumes:
   postgres_data:

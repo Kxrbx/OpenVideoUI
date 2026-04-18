@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createTextChatForUser } from "@creative-studio/database";
+import { createTextChatForUser } from "@openvideoui/database";
 import { requireSession } from "@/lib/api-auth";
 
 type CreateTextChatRequest = {

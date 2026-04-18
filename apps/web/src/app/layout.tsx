@@ -9,7 +9,7 @@ const beauRivage = Beau_Rivage({
 });
 
 export const metadata: Metadata = {
-  title: "Creative AI Studio",
+  title: "OpenVideoUI",
   description: "Project-centered studio for OpenRouter image and video generation."
 };
 

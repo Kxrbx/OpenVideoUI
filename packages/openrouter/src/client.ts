@@ -1,4 +1,4 @@
-import { readRuntimeEnv } from "@creative-studio/shared";
+import { readRuntimeEnv } from "@openvideoui/shared";
 import type {
   OpenRouterChatMessage,
   OpenRouterImageGenerationResponse,

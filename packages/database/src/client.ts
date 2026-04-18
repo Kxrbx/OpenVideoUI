@@ -1,6 +1,6 @@
 import { drizzle } from "drizzle-orm/node-postgres";
 import { Pool } from "pg";
-import { readRuntimeEnv } from "@creative-studio/shared";
+import { readRuntimeEnv } from "@openvideoui/shared";
 import * as schema from "./schema";
 
 type DatabaseClient = ReturnType<typeof createDatabaseClient>;

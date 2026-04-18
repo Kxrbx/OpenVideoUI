@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getRenderForUser } from "@creative-studio/database";
+import { getRenderForUser } from "@openvideoui/database";
 import { requireSession } from "@/lib/api-auth";
 
 type RouteContext = {

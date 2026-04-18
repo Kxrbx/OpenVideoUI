@@ -153,7 +153,7 @@ type ChatSession = {
 
 type AccentPaletteId = "jade" | "dusty-teal" | "muted-sage" | "smoky-lavender" | "warm-sand";
 
-const LOCAL_STORAGE_KEY = "creative-ai-studio.local-settings";
+const LOCAL_STORAGE_KEY = "openvideoui.local-settings";
 const DEFAULT_BACKGROUND_PAGE_URL = "https://streamable.com/kgv4oa";
 const DEFAULT_BACKGROUND_STREAMABLE_EMBED_URL =
   "https://streamable.com/e/kgv4oa?autoplay=1&muted=1&loop=1&nocontrols=1";
@@ -1931,7 +1931,7 @@ export function StudioApp({
               </div>
               {!isSidebarCollapsed ? (
                 <div>
-                  <div className="studio-brand">Creative AI Studio</div>
+                  <div className="studio-brand">OpenVideoUI</div>
                 </div>
               ) : null}
             </div>

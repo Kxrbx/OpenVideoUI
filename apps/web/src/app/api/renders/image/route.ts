@@ -5,9 +5,9 @@ import {
   failRender,
   getModelCapabilityById,
   getProjectForUser
-} from "@creative-studio/database";
-import { createOpenRouterClient } from "@creative-studio/openrouter";
-import { storeAsset } from "@creative-studio/storage";
+} from "@openvideoui/database";
+import { createOpenRouterClient } from "@openvideoui/openrouter";
+import { storeAsset } from "@openvideoui/storage";
 import { requireSession } from "@/lib/api-auth";
 import { getOpenRouterApiKey } from "@/lib/openrouter-key";
 

@@ -1,10 +1,10 @@
-# Creative AI Studio
+# OpenVideoUI
 
 Local-first creative studio for generating text, images, and videos through OpenRouter.
 
 ## Overview
 
-Creative AI Studio is a TypeScript monorepo built around a project-centered workflow:
+OpenVideoUI is a TypeScript monorepo built around a project-centered workflow:
 
 - `projects` organize creative work
 - `renders` track image and video generations
@@ -46,18 +46,18 @@ The app is designed to run locally with Docker and provides a single interface f
 
 ```text
 .
-├─ apps/
-│  ├─ web/         # Next.js app
-│  └─ worker/      # background worker for polling and model sync
-├─ packages/
-│  ├─ database/    # Drizzle schema and query layer
-│  ├─ openrouter/  # OpenRouter client and types
-│  ├─ queue/       # Redis-backed queue helpers
-│  ├─ shared/      # shared runtime env and utilities
-│  └─ storage/     # local asset storage abstraction
-├─ drizzle/        # generated SQL migrations
-├─ docker-compose.yml
-└─ .env.example
+â”œâ”€ apps/
+â”‚  â”œâ”€ web/         # Next.js app
+â”‚  â””â”€ worker/      # background worker for polling and model sync
+â”œâ”€ packages/
+â”‚  â”œâ”€ database/    # Drizzle schema and query layer
+â”‚  â”œâ”€ openrouter/  # OpenRouter client and types
+â”‚  â”œâ”€ queue/       # Redis-backed queue helpers
+â”‚  â”œâ”€ shared/      # shared runtime env and utilities
+â”‚  â””â”€ storage/     # local asset storage abstraction
+â”œâ”€ drizzle/        # generated SQL migrations
+â”œâ”€ docker-compose.yml
+â””â”€ .env.example
 ```
 
 ## Prerequisites
@@ -81,14 +81,14 @@ Important variables:
 OPENROUTER_API_KEY=
 OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 OPENROUTER_HTTP_REFERER=http://localhost:3000
-OPENROUTER_TITLE=Creative AI Studio
+OPENROUTER_TITLE=OpenVideoUI
 
 DATABASE_URL=postgresql://studio:studio@postgres:5432/studio
 REDIS_URL=redis://redis:6379
 
 ASSET_STORAGE_DIR=.data/assets
 NEXT_PUBLIC_APP_URL=http://localhost:3000
-SESSION_COOKIE_NAME=creative_studio_session
+SESSION_COOKIE_NAME=openvideoui_session
 ```
 
 ## Quick Start

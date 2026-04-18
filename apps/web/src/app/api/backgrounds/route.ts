@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { storeAsset } from "@creative-studio/storage";
+import { storeAsset } from "@openvideoui/storage";
 import { requireSession } from "@/lib/api-auth";
 
 type CreateBackgroundRequest = {

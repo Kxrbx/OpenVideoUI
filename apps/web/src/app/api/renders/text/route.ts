@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createOpenRouterClient } from "@creative-studio/openrouter";
+import { createOpenRouterClient } from "@openvideoui/openrouter";
 import { requireSession } from "@/lib/api-auth";
 import { getOpenRouterApiKey } from "@/lib/openrouter-key";
 

@@ -1,15 +1,15 @@
 {
-  "name": "creative-ai-studio",
+  "name": "openvideoui",
   "private": true,
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "dev:web": "npm run dev --workspace @creative-studio/web",
-    "dev:worker": "npm run dev --workspace @creative-studio/worker",
-    "sync:models": "npm run sync:models --workspace @creative-studio/worker",
-    "build:web": "npm run build --workspace @creative-studio/web",
+    "dev:web": "npm run dev --workspace @openvideoui/web",
+    "dev:worker": "npm run dev --workspace @openvideoui/worker",
+    "sync:models": "npm run sync:models --workspace @openvideoui/worker",
+    "build:web": "npm run build --workspace @openvideoui/web",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:seed": "tsx packages/database/src/seed.ts",

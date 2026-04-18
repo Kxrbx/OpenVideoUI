@@ -5,7 +5,7 @@ import {
   deleteSessionByToken,
   getUserBySessionToken,
   upsertUser
-} from "@creative-studio/database";
+} from "@openvideoui/database";
 
 export type Session = {
   id: string;
@@ -13,7 +13,7 @@ export type Session = {
   email: string;
 };
 
-const DEFAULT_COOKIE_NAME = "studio_session";
+const DEFAULT_COOKIE_NAME = "openvideoui_session";
 
 function getCookieName() {
   return process.env.SESSION_COOKIE_NAME || DEFAULT_COOKIE_NAME;

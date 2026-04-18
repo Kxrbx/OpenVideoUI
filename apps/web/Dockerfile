@@ -17,4 +17,4 @@ COPY . .
 
 EXPOSE 3000
 
-CMD ["npm", "run", "dev", "--workspace", "@creative-studio/web"]
+CMD ["npm", "run", "dev", "--workspace", "@openvideoui/web"]

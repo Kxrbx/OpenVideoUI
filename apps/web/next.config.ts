@@ -5,7 +5,7 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: path.join(__dirname, "../..")
   },
-  transpilePackages: ["@creative-studio/shared"]
+  transpilePackages: ["@openvideoui/shared"]
 };
 
 export default nextConfig;

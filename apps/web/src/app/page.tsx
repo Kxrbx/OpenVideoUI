@@ -3,7 +3,7 @@ import {
   getProjectsForUser,
   getRecentRendersForUser,
   getTextChatsForUser
-} from "@creative-studio/database";
+} from "@openvideoui/database";
 import { getSession } from "@/lib/session";
 import { StudioApp } from "@/components/studio-app";
 

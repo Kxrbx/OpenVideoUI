@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createProjectForUser } from "@creative-studio/database";
+import { createProjectForUser } from "@openvideoui/database";
 import { requireSession } from "@/lib/api-auth";
 
 type CreateProjectRequest = {

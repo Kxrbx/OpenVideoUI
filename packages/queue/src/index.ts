@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { createClient, type RedisClientType } from "redis";
-import { readRuntimeEnv } from "@creative-studio/shared";
+import { readRuntimeEnv } from "@openvideoui/shared";
 
-const POLL_QUEUE_KEY = "creative-studio:video-poll-queue";
-const LOCK_PREFIX = "creative-studio:render-lock:";
-const HEARTBEAT_PREFIX = "creative-studio:worker-heartbeat:";
+const POLL_QUEUE_KEY = "openvideoui:video-poll-queue";
+const LOCK_PREFIX = "openvideoui:render-lock:";
+const HEARTBEAT_PREFIX = "openvideoui:worker-heartbeat:";
 
 export type RenderQueueClient = {
   workerId: string;

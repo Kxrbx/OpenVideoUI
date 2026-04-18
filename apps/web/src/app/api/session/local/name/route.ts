@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { updateUserName } from "@creative-studio/database";
+import { updateUserName } from "@openvideoui/database";
 import { requireSession } from "@/lib/api-auth";
 
 export async function PATCH(request: NextRequest) {

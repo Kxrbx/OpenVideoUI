@@ -1,5 +1,5 @@
 {
-  "name": "@creative-studio/worker",
+  "name": "@openvideoui/worker",
   "private": true,
   "scripts": {
     "dev": "tsx watch src/index.ts",
@@ -8,11 +8,11 @@
     "typecheck": "tsc --project tsconfig.json --pretty false"
   },
   "dependencies": {
-    "@creative-studio/database": "*",
-    "@creative-studio/openrouter": "*",
-    "@creative-studio/queue": "*",
-    "@creative-studio/shared": "*",
-    "@creative-studio/storage": "*"
+    "@openvideoui/database": "*",
+    "@openvideoui/openrouter": "*",
+    "@openvideoui/queue": "*",
+    "@openvideoui/shared": "*",
+    "@openvideoui/storage": "*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

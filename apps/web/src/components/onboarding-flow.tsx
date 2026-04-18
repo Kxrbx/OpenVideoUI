@@ -13,7 +13,7 @@ type ModelOption = {
   providerType: string;
 };
 
-const LOCAL_STORAGE_KEY = "creative-ai-studio.local-settings";
+const LOCAL_STORAGE_KEY = "openvideoui.local-settings";
 const FREE_TEXT_MODEL_ID = "openrouter/free";
 
 export function OnboardingFlow() {

@@ -15,4 +15,4 @@ RUN npm install
 
 COPY . .
 
-CMD ["npm", "run", "dev", "--workspace", "@creative-studio/worker"]
+CMD ["npm", "run", "dev", "--workspace", "@openvideoui/worker"]

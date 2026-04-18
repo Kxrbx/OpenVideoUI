@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readStoredAsset } from "@creative-studio/storage";
+import { readStoredAsset } from "@openvideoui/storage";
 import { requireSession } from "@/lib/api-auth";
 
 type RouteContext = {

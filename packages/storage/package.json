@@ -1,5 +1,5 @@
 {
-  "name": "@creative-studio/storage",
+  "name": "@openvideoui/storage",
   "private": true,
   "exports": {
     ".": "./src/index.ts"
@@ -8,7 +8,7 @@
     "typecheck": "tsc --project tsconfig.json --pretty false"
   },
   "dependencies": {
-    "@creative-studio/shared": "*"
+    "@openvideoui/shared": "*"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

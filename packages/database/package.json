@@ -1,5 +1,5 @@
 {
-  "name": "@creative-studio/database",
+  "name": "@openvideoui/database",
   "private": true,
   "exports": {
     ".": "./src/index.ts"
@@ -8,8 +8,8 @@
     "typecheck": "tsc --project tsconfig.json --pretty false"
   },
   "dependencies": {
-    "@creative-studio/openrouter": "*",
-    "@creative-studio/shared": "*",
+    "@openvideoui/openrouter": "*",
+    "@openvideoui/shared": "*",
     "drizzle-orm": "^0.44.2",
     "pg": "^8.16.3"
   },

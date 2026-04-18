@@ -1,7 +1,7 @@
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { readRuntimeEnv } from "@creative-studio/shared";
+import { readRuntimeEnv } from "@openvideoui/shared";
 
 export type StoredAsset = {
   storageKey: string;

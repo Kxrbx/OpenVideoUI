@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readRuntimeEnv } from "@creative-studio/shared";
+import { readRuntimeEnv } from "@openvideoui/shared";
 
 export async function GET() {
   const env = readRuntimeEnv();

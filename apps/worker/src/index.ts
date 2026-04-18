@@ -4,15 +4,15 @@ import {
   getPollableVideoRenders,
   syncOpenRouterModelCapabilities,
   syncVideoRenderFromProvider
-} from "@creative-studio/database";
-import { createOpenRouterClient } from "@creative-studio/openrouter";
-import { createRenderQueueClient } from "@creative-studio/queue";
-import { storeAsset } from "@creative-studio/storage";
+} from "@openvideoui/database";
+import { createOpenRouterClient } from "@openvideoui/openrouter";
+import { createRenderQueueClient } from "@openvideoui/queue";
+import { storeAsset } from "@openvideoui/storage";
 import {
   readRuntimeEnv,
   renderStatuses,
   studioInfrastructure
-} from "@creative-studio/shared";
+} from "@openvideoui/shared";
 
 const env = readRuntimeEnv();
 const workerService = studioInfrastructure.find((service) => service.name === "Worker");

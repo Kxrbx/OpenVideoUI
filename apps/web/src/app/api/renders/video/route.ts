@@ -6,10 +6,10 @@ import {
   getProjectForUser,
   updateRenderAfterVideoSubmission,
   failRender
-} from "@creative-studio/database";
-import { createOpenRouterClient } from "@creative-studio/openrouter";
-import { createRenderQueueClient } from "@creative-studio/queue";
-import { storeAsset } from "@creative-studio/storage";
+} from "@openvideoui/database";
+import { createOpenRouterClient } from "@openvideoui/openrouter";
+import { createRenderQueueClient } from "@openvideoui/queue";
+import { storeAsset } from "@openvideoui/storage";
 import { requireSession } from "@/lib/api-auth";
 import { getOpenRouterApiKey } from "@/lib/openrouter-key";
 

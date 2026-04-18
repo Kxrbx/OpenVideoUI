@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { listModelCapabilities } from "@creative-studio/database";
+import { listModelCapabilities } from "@openvideoui/database";
 import { requireSession } from "@/lib/api-auth";
 
 const ROUTER_MODEL_PRIORITY = new Map<string, number>([

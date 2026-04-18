@@ -1,5 +1,5 @@
 {
-  "name": "@creative-studio/shared",
+  "name": "@openvideoui/shared",
   "private": true,
   "exports": {
     ".": "./src/index.ts"
