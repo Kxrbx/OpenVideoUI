@@ -54,7 +54,36 @@ export async function GET(request: NextRequest) {
       allowedPassthroughParameters: model.allowedPassthroughParameters,
       generateAudio: model.generateAudio,
       supportsImageToVideo: model.supportedFrameImages.length > 0,
-      supportsReferenceImages: model.allowedPassthroughParameters.includes("input_references")
+      supportsReferenceImages: model.allowedPassthroughParameters.includes("input_references"),
+      pricingPrompt:
+        typeof model.rawPayload?.pricing === "object" &&
+        model.rawPayload?.pricing &&
+        "prompt" in model.rawPayload.pricing
+          ? model.rawPayload.pricing.prompt
+          : null,
+      pricingCompletion:
+        typeof model.rawPayload?.pricing === "object" &&
+        model.rawPayload?.pricing &&
+        "completion" in model.rawPayload.pricing
+          ? model.rawPayload.pricing.completion
+          : null,
+      pricingRequest:
+        typeof model.rawPayload?.pricing === "object" &&
+        model.rawPayload?.pricing &&
+        "request" in model.rawPayload.pricing
+          ? model.rawPayload.pricing.request
+          : null,
+      pricingImage:
+        typeof model.rawPayload?.pricing === "object" &&
+        model.rawPayload?.pricing &&
+        "image" in model.rawPayload.pricing
+          ? model.rawPayload.pricing.image
+          : null,
+      pricingSkus:
+        typeof model.rawPayload?.pricing_skus === "object" && model.rawPayload?.pricing_skus
+          ? model.rawPayload.pricing_skus
+          : null,
+      pricingNote: model.modelId === "openrouter/auto" ? "Routing-dependent pricing" : undefined
     })))
   });
 }

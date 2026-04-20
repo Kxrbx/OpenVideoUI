@@ -1,5 +1,4 @@
 import {
-  failRender,
   getRenderById,
   getPollableVideoRenders,
   syncOpenRouterModelCapabilities,
@@ -61,27 +60,27 @@ async function processRender(render: Awaited<ReturnType<typeof getRenderById>>) 
   if (status.status === "completed" && (status.unsigned_urls?.length ?? 0) > 0) {
     try {
       const storedOutputs = await Promise.all(
-        (status.unsigned_urls ?? []).map((source, index) =>
+        (status.unsigned_urls ?? []).map((_source, index) =>
           storeAsset({
             renderId: render.id,
             mediaType: "video",
-            source,
+            source: client.getVideoContentUrl(render.providerJobId, index),
             sourceKind: "generated",
-            fileNameHint: `video-${index + 1}.mp4`
+            fileNameHint: `video-${index + 1}.mp4`,
+            headers: {
+              Authorization: `Bearer ${env.openRouterApiKey}`
+            }
           })
         )
       );
 
       await syncVideoRenderFromProvider(render.id, status, storedOutputs);
     } catch (storageError) {
-      await failRender(
-        render.id,
-        "asset_storage_error",
-        storageError instanceof Error
-          ? storageError.message
-          : "Video completed but local asset storage failed.",
-        status as Record<string, unknown>
+      console.warn(
+        `[worker] local video asset storage failed for ${render.id}; falling back to provider URLs`,
+        storageError instanceof Error ? storageError.message : storageError
       );
+      await syncVideoRenderFromProvider(render.id, status);
       return "terminal" as const;
     }
   }

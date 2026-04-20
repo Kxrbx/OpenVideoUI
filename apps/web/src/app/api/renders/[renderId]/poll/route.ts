@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
-  failRender,
   getRenderForUser,
   syncVideoRenderFromProvider
 } from "@openvideoui/database";
@@ -38,7 +37,16 @@ export async function POST(_request: NextRequest, context: RouteContext) {
     return NextResponse.json({ error: "Render does not have a provider job ID." }, { status: 400 });
   }
 
-  if (render.status === "completed" || render.status === "failed" || render.status === "canceled") {
+  const canRecoverFailedAssetDownload =
+    render.status === "failed" &&
+    render.failureCode === "asset_storage_error" &&
+    render.mediaType === "video";
+
+  if (
+    render.status === "completed" ||
+    render.status === "canceled" ||
+    (render.status === "failed" && !canRecoverFailedAssetDownload)
+  ) {
     return NextResponse.json({ data: render });
   }
 
@@ -54,27 +62,27 @@ export async function POST(_request: NextRequest, context: RouteContext) {
     if (status.status === "completed" && (status.unsigned_urls?.length ?? 0) > 0) {
       try {
         const storedOutputs = await Promise.all(
-          (status.unsigned_urls ?? []).map((source, index) =>
+          (status.unsigned_urls ?? []).map((_source, index) =>
             storeAsset({
               renderId: render.id,
               mediaType: "video",
-              source,
+              source: client.getVideoContentUrl(render.providerJobId!, index),
               sourceKind: "generated",
-              fileNameHint: `video-${index + 1}.mp4`
+              fileNameHint: `video-${index + 1}.mp4`,
+              headers: {
+                Authorization: `Bearer ${apiKey}`
+              }
             })
           )
         );
 
         updatedRender = await syncVideoRenderFromProvider(render.id, status, storedOutputs);
       } catch (storageError) {
-        updatedRender = await failRender(
-          render.id,
-          "asset_storage_error",
-          storageError instanceof Error
-            ? storageError.message
-            : "Video completed but local asset storage failed.",
-          status as Record<string, unknown>
+        console.warn(
+          `[render poll] local video asset storage failed for ${render.id}; falling back to provider URLs`,
+          storageError instanceof Error ? storageError.message : storageError
         );
+        updatedRender = await syncVideoRenderFromProvider(render.id, status);
       }
     } else {
       updatedRender = await syncVideoRenderFromProvider(render.id, status);

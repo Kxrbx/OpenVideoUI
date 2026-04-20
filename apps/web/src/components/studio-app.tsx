@@ -5,6 +5,7 @@ import {
   Bot,
   Check,
   ChevronDown,
+  Download,
   Folder,
   History,
   House,
@@ -58,6 +59,7 @@ type RenderRecord = {
   settings?: Record<string, unknown> | null;
   providerRequest?: Record<string, unknown> | null;
   outputUrls: string[];
+  failureCode?: string | null;
   failureMessage: string | null;
   providerJobId: string | null;
 };
@@ -78,6 +80,12 @@ type ModelOption = {
   generateAudio?: boolean | null;
   supportsImageToVideo?: boolean;
   supportsReferenceImages?: boolean;
+  pricingPrompt?: string | null;
+  pricingCompletion?: string | null;
+  pricingRequest?: string | null;
+  pricingImage?: string | null;
+  pricingSkus?: Record<string, string> | null;
+  pricingNote?: string;
 };
 
 type CurrentResult =
@@ -155,7 +163,7 @@ type AccentPaletteId = "jade" | "dusty-teal" | "muted-sage" | "smoky-lavender" |
 
 const LOCAL_STORAGE_KEY = "openvideoui.local-settings";
 const DEFAULT_BACKGROUND_PAGE_URL = "https://streamable.com/kgv4oa";
-const DEFAULT_BACKGROUND_STREAMABLE_EMBED_URL =
+const DEFAULT_BACKGROUND_EMBED_URL =
   "https://streamable.com/e/kgv4oa?autoplay=1&muted=1&loop=1&nocontrols=1";
 const FREE_TEXT_MODEL_ID = "openrouter/free";
 const VIDEO_LOADING_LINES = [
@@ -256,9 +264,31 @@ function getDefaultBackgroundSource(): BackgroundSource {
   return {
     origin: "default",
     renderAs: "embed",
-    src: DEFAULT_BACKGROUND_STREAMABLE_EMBED_URL,
+    src: DEFAULT_BACKGROUND_EMBED_URL,
     label: "Default Streamable background"
   };
+}
+
+function extractYouTubeVideoId(url: URL) {
+  const hostname = url.hostname.replace(/^www\./, "");
+
+  if (hostname === "youtu.be") {
+    return url.pathname.split("/").filter(Boolean)[0] || null;
+  }
+
+  if (hostname === "youtube.com" || hostname === "m.youtube.com") {
+    if (url.pathname === "/watch") {
+      return url.searchParams.get("v");
+    }
+
+    const parts = url.pathname.split("/").filter(Boolean);
+
+    if (parts[0] === "shorts" || parts[0] === "embed") {
+      return parts[1] || null;
+    }
+  }
+
+  return null;
 }
 
 function resolveBackgroundUrl(value: string): BackgroundSource | null {
@@ -298,6 +328,17 @@ function resolveBackgroundUrl(value: string): BackgroundSource | null {
       };
     }
 
+    const youtubeVideoId = extractYouTubeVideoId(url);
+
+    if (youtubeVideoId) {
+      return {
+        origin: "url",
+        renderAs: "embed",
+        src: `https://www.youtube-nocookie.com/embed/${youtubeVideoId}?autoplay=1&mute=1&controls=0&loop=1&playlist=${youtubeVideoId}&playsinline=1&modestbranding=1&rel=0&iv_load_policy=3`,
+        label: `YouTube ${youtubeVideoId}`
+      };
+    }
+
     if (url.protocol === "http:" || url.protocol === "https:") {
       return {
         origin: "url",
@@ -329,6 +370,249 @@ function getSessionGreeting() {
 
 function normalizeBackgroundUrlInput(value: unknown) {
   return typeof value === "string" ? value : "";
+}
+
+function formatUsdPerMillionTokens(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return null;
+  }
+
+  if (numericValue === 0) {
+    return "free";
+  }
+
+  const perMillion = numericValue * 1_000_000;
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: perMillion >= 1 ? 2 : 4
+  }).format(perMillion);
+}
+
+function formatUsd(value: string | null | undefined, maximumFractionDigits = 4) {
+  if (!value) {
+    return null;
+  }
+
+  const numericValue = Number(value);
+
+  if (!Number.isFinite(numericValue)) {
+    return null;
+  }
+
+  if (numericValue === 0) {
+    return "free";
+  }
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits
+  }).format(numericValue);
+}
+
+function formatVideoPricingSkus(pricingSkus: Record<string, string> | null | undefined) {
+  if (!pricingSkus) {
+    return "";
+  }
+
+  const scoreSku = (sku: string) => {
+    if (sku.startsWith("text_to_video")) {
+      return 0;
+    }
+
+    if (sku.startsWith("image_to_video")) {
+      return 1;
+    }
+
+    if (sku.includes("without_audio")) {
+      return 2;
+    }
+
+    if (sku.includes("with_audio")) {
+      return 3;
+    }
+
+    if (sku.includes("duration_seconds")) {
+      return 4;
+    }
+
+    if (sku.includes("video_tokens")) {
+      return 5;
+    }
+
+    return 10;
+  };
+
+  const entries = Object.entries(pricingSkus)
+    .sort(([leftSku], [rightSku]) => {
+      const scoreDifference = scoreSku(leftSku) - scoreSku(rightSku);
+
+      if (scoreDifference !== 0) {
+        return scoreDifference;
+      }
+
+      return leftSku.localeCompare(rightSku);
+    })
+    .map(([sku, value]) => {
+      const price = formatUsd(value, 4);
+
+      if (!price || price === "free") {
+        return null;
+      }
+
+      if (sku === "duration_seconds") {
+        return `${price}/sec`;
+      }
+
+      if (sku === "duration_seconds_with_audio") {
+        return `Audio ${price}/sec`;
+      }
+
+      if (sku === "duration_seconds_without_audio") {
+        return `Silent ${price}/sec`;
+      }
+
+      const audioResolutionMatch = sku.match(/^duration_seconds_(with|without)_audio_(.+)$/);
+
+      if (audioResolutionMatch) {
+        const audioLabel = audioResolutionMatch[1] === "with" ? "Audio" : "Silent";
+        return `${audioResolutionMatch[2]} ${audioLabel} ${price}/sec`;
+      }
+
+      const resolutionMatch = sku.match(/^duration_seconds_(.+)$/);
+
+      if (resolutionMatch) {
+        return `${resolutionMatch[1]} ${price}/sec`;
+      }
+
+      const workflowResolutionMatch = sku.match(
+        /^(text_to_video|image_to_video)_duration_seconds_(.+)$/
+      );
+
+      if (workflowResolutionMatch) {
+        const workflowLabel = workflowResolutionMatch[1] === "text_to_video" ? "T2V" : "I2V";
+        return `${workflowLabel} ${workflowResolutionMatch[2]} ${price}/sec`;
+      }
+
+      if (sku === "video_tokens") {
+        return `${price}/video token`;
+      }
+
+      if (sku === "video_tokens_without_audio") {
+        return `Silent ${price}/video token`;
+      }
+
+      return `${sku.replaceAll("_", " ")} ${price}`;
+    })
+    .filter((entry): entry is string => Boolean(entry));
+
+  return entries.slice(0, 3).join(" • ");
+}
+
+function extractImagePricingFromDescription(description: string | null | undefined) {
+  if (!description) {
+    return "";
+  }
+
+  const perImageMatch = description.match(/Pricing is \$(\d+(?:\.\d+)?) per output image/i);
+
+  if (perImageMatch) {
+    return `$${perImageMatch[1]}/image`;
+  }
+
+  const fromImageMatch = description.match(/from \$(\d+(?:\.\d+)?) per image/i);
+
+  if (fromImageMatch) {
+    return `from $${fromImageMatch[1]}/image`;
+  }
+
+  const oneAndTwoKMatch = description.match(
+    /\$(\d+(?:\.\d+)?) per 1K output image and \$(\d+(?:\.\d+)?) per 2K output image/i
+  );
+
+  if (oneAndTwoKMatch) {
+    return `1K $${oneAndTwoKMatch[1]} • 2K $${oneAndTwoKMatch[2]}`;
+  }
+
+  const oneTwoAndFourKMatch = description.match(
+    /\$(\d+(?:\.\d+)?) per 1K\/2K output image and \$(\d+(?:\.\d+)?) per 4K output image/i
+  );
+
+  if (oneTwoAndFourKMatch) {
+    return `1K/2K $${oneTwoAndFourKMatch[1]} • 4K $${oneTwoAndFourKMatch[2]}`;
+  }
+
+  const megapixelMatch = description.match(
+    /first generated megapixel is charged \$(\d+(?:\.\d+)?)\..*subsequent megapixel.*\$(\d+(?:\.\d+)?)/i
+  );
+
+  if (megapixelMatch) {
+    return `1st MP $${megapixelMatch[1]} • next MP $${megapixelMatch[2]}`;
+  }
+
+  return "";
+}
+
+function getModelPricingSummary(model: ModelOption | null) {
+  if (!model) {
+    return "";
+  }
+
+  if (model.pricingNote) {
+    return model.pricingNote;
+  }
+
+  if (model.providerType === "video") {
+    return formatVideoPricingSkus(model.pricingSkus);
+  }
+
+  if (model.providerType === "image") {
+    const descriptionPricing = extractImagePricingFromDescription(model.description);
+
+    if (descriptionPricing) {
+      return descriptionPricing;
+    }
+
+    const imagePrice = formatUsd(model.pricingImage, 4);
+
+    if (imagePrice && imagePrice !== "free") {
+      return `${imagePrice}/image`;
+    }
+
+    const requestPrice = formatUsd(model.pricingRequest, 4);
+
+    if (requestPrice && requestPrice !== "free") {
+      return `${requestPrice}/request`;
+    }
+
+    return "";
+  }
+
+  const promptPrice = formatUsdPerMillionTokens(model.pricingPrompt);
+  const completionPrice = formatUsdPerMillionTokens(model.pricingCompletion);
+  const requestPrice = formatUsd(model.pricingRequest, 4);
+
+  if (!promptPrice && !completionPrice) {
+    return requestPrice ? `${requestPrice}/request` : "";
+  }
+
+  if (promptPrice && completionPrice) {
+    return `Input ${promptPrice}/1M • Output ${completionPrice}/1M`;
+  }
+
+  if (promptPrice) {
+    return `Input ${promptPrice}/1M`;
+  }
+
+  return `Output ${completionPrice}/1M`;
 }
 
 function pickInitialString(options: string[] | undefined, current: string) {
@@ -833,6 +1117,14 @@ export function StudioApp({
   const canSaveSettingsKey = settingsApiKey.trim().length > 0 && !isSavingSettings;
   const canSaveDisplayName = settingsDisplayName.trim().length > 0 && !isSavingSettings;
   const canApplyBackgroundLink = backgroundUrlInput.trim().length > 0;
+  const selectedModelPricingSummary = getModelPricingSummary(selectedModelOption);
+  const canRecoverActiveVideo = Boolean(
+    activeRender &&
+      activeRender.mediaType === "video" &&
+      activeRender.failureCode === "asset_storage_error" &&
+      activeRender.providerJobId &&
+      apiKey
+  );
 
   const visibleHistory = useMemo(
     () => renderHistory.filter((render) => render.projectId === selectedProjectId).slice(0, 8),
@@ -1264,12 +1556,24 @@ export function StudioApp({
   }
 
   function buildChatTitle(promptValue: string) {
-    const trimmed = promptValue.trim();
+    const trimmed = promptValue.replace(/\s+/g, " ").trim();
     if (!trimmed) {
       return "Untitled chat";
     }
 
-    return trimmed.length > 48 ? `${trimmed.slice(0, 48)}...` : trimmed;
+    return trimmed.length > 32 ? `${trimmed.slice(0, 32)}...` : trimmed;
+  }
+
+  function buildResultFileName(result: CurrentResult) {
+    const baseName =
+      result.prompt
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 48) || "openvideoui-result";
+    const extension = result.kind === "video" ? "mp4" : "png";
+
+    return `${baseName}.${extension}`;
   }
 
   async function createChatOnServer(input: {
@@ -1875,6 +2179,53 @@ export function StudioApp({
     await generateWithSnapshot(snapshot);
   }
 
+  function handleDownloadCurrentResult() {
+    if (!currentResult || currentResult.kind === "text") {
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.href = currentResult.src;
+    link.download = buildResultFileName(currentResult);
+    link.rel = "noopener";
+    document.body.append(link);
+    link.click();
+    link.remove();
+  }
+
+  function handleDownloadActiveRender() {
+    if (!activeRender?.outputUrls[0]) {
+      return;
+    }
+
+    const kind = activeRender.mediaType === "video" ? "video" : "image";
+    const link = document.createElement("a");
+    link.href = activeRender.outputUrls[0];
+    link.download = buildResultFileName({
+      kind,
+      modelId: activeRender.modelId,
+      prompt: activeRender.prompt,
+      src: activeRender.outputUrls[0]
+    });
+    link.rel = "noopener";
+    document.body.append(link);
+    link.click();
+    link.remove();
+  }
+
+  function handleRecoverActiveRender() {
+    if (!activeRender || !canRecoverActiveVideo) {
+      return;
+    }
+
+    clearPollTimer();
+    setError("");
+    setCurrentResult(null);
+    setSurfaceState("generating");
+    setStatusLabel("Recovering video");
+    void pollRender(activeRender.id);
+  }
+
   async function pollRender(renderId: string) {
     const response = await fetch(`/api/renders/${renderId}/poll`, {
       method: "POST",
@@ -2130,7 +2481,7 @@ export function StudioApp({
         <div className="studio-background">
           {backgroundSource.renderAs === "embed" ? (
             <iframe
-              allow="autoplay; fullscreen"
+              allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
               className="studio-background-embed"
               src={backgroundSource.src}
               tabIndex={-1}
@@ -2331,12 +2682,13 @@ export function StudioApp({
                       aria-label="Background video URL"
                       className="settings-input"
                       onChange={(event) => setBackgroundUrlInput(event.target.value)}
-                      placeholder="https://streamable.com/... or https://cdn.example.com/video.mp4"
+                      placeholder="https://youtube.com/... https://streamable.com/... or https://cdn.example.com/video.mp4"
                       value={normalizeBackgroundUrlInput(backgroundUrlInput)}
                     />
                     <div className="settings-note">
-                      Streamable links are converted to a muted looping embed. Direct video
-                      links are played as muted background video.
+                      YouTube and Streamable links are converted to muted looping embeds.
+                      Direct video links are played as muted background video. Some YouTube
+                      videos cannot be embedded and will show a YouTube restriction screen.
                     </div>
                     <div className="settings-actions">
                       <button
@@ -2386,21 +2738,109 @@ export function StudioApp({
         ) : null}
 
         <div
-          className={
-            mode === "text" && hasTextConversation ? "studio-stage text-stage" : "studio-stage"
-          }
+          className={`studio-stage${mode === "text" && hasTextConversation ? " text-stage" : ""}${mode !== "text" && surfaceState !== "idle" ? " media-stage" : ""}`}
         >
-          {surfaceState === "generating" && mode !== "text" ? (
-            <section className="generate-card">
-              <div className="generate-status">{statusLabel}</div>
-              <div className="generate-whisper">{activeLoadingLine}</div>
-              <h2>{prompt || deferredPrompt}</h2>
-              <div className="generate-meta">
-                <span>{mode}</span>
-                <span>{selectedModel}</span>
-                <span>{selectedProject?.title}</span>
-              </div>
-            </section>
+          {mode !== "text" && surfaceState !== "idle" ? (
+            <div className="studio-output-slot">
+              {surfaceState === "generating" ? (
+                <section className="generate-card">
+                  <div className="generate-status">{statusLabel}</div>
+                  <div className="generate-whisper">{activeLoadingLine}</div>
+                  <h2 className="generate-prompt">{prompt || deferredPrompt}</h2>
+                  <div className="generate-meta">
+                    <span>{mode}</span>
+                    <span>{selectedModel}</span>
+                    <span>{selectedProject?.title}</span>
+                  </div>
+                </section>
+              ) : null}
+
+              {surfaceState === "result" && currentResult && currentResult.kind !== "text" ? (
+                <section className="result-card">
+                  <div className="result-card-head">
+                    <div>
+                      <h2>{currentResult.prompt}</h2>
+                      <div className="result-meta">
+                        <span>{currentResult.modelId}</span>
+                        <span>{currentResult.kind}</span>
+                      </div>
+                    </div>
+                    <div className="result-card-actions">
+                      <div className="result-status">{statusLabel}</div>
+                      <button
+                        className="button-secondary"
+                        onClick={handleDownloadCurrentResult}
+                        type="button"
+                      >
+                        <Download aria-hidden="true" size={14} strokeWidth={1.9} />
+                        <span>Download</span>
+                      </button>
+                      {activeRender ? (
+                        <button
+                          className="button-secondary"
+                          onClick={() => void handleRetryActiveRender()}
+                          type="button"
+                        >
+                          <RotateCcw aria-hidden="true" size={14} strokeWidth={1.9} />
+                          <span>Retry</span>
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="result-media-frame">
+                    {currentResult.kind === "image" ? (
+                      <img alt={currentResult.prompt} src={currentResult.src} />
+                    ) : null}
+                    {currentResult.kind === "video" ? (
+                      <video controls playsInline src={currentResult.src} />
+                    ) : null}
+                  </div>
+                </section>
+              ) : null}
+
+              {surfaceState === "failed" && activeRender ? (
+                <section className="failed-card">
+                  <div className="failed-card-head">
+                    <div>
+                      <h2>{activeRender.prompt}</h2>
+                      <div className="result-meta">
+                        <span>{activeRender.modelId}</span>
+                        <span>{activeRender.workflowType}</span>
+                      </div>
+                    </div>
+                    <div className="result-card-actions">
+                      <div className="failed-status">Failed</div>
+                      {activeRender.outputUrls[0] ? (
+                        <button
+                          className="button-secondary"
+                          onClick={handleDownloadActiveRender}
+                          type="button"
+                        >
+                          <Download aria-hidden="true" size={14} strokeWidth={1.9} />
+                          <span>Download</span>
+                        </button>
+                      ) : null}
+                      <button
+                        className="button-secondary"
+                        onClick={
+                          canRecoverActiveVideo
+                            ? handleRecoverActiveRender
+                            : () => void handleRetryActiveRender()
+                        }
+                        type="button"
+                      >
+                        <RotateCcw aria-hidden="true" size={14} strokeWidth={1.9} />
+                        <span>{canRecoverActiveVideo ? "Recover video" : "Retry"}</span>
+                      </button>
+                    </div>
+                  </div>
+                  <div className="failed-message">
+                    {activeRender.failureMessage || "This render failed before completion."}
+                  </div>
+                </section>
+              ) : null}
+            </div>
           ) : null}
 
           {mode === "text" && hasTextConversation ? (
@@ -2445,70 +2885,6 @@ export function StudioApp({
                     <div className="chat-thinking-copy">{activeLoadingLine}</div>
                   </article>
                 ) : null}
-              </div>
-            </section>
-          ) : null}
-
-          {surfaceState === "result" && currentResult && currentResult.kind !== "text" ? (
-            <section className="result-card">
-              <div className="result-card-head">
-                <div>
-                  <h2>{currentResult.prompt}</h2>
-                  <div className="result-meta">
-                    <span>{currentResult.modelId}</span>
-                    <span>{currentResult.kind}</span>
-                  </div>
-                </div>
-                <div className="result-card-actions">
-                  <div className="result-status">{statusLabel}</div>
-                  {activeRender ? (
-                    <button
-                      className="button-secondary"
-                      onClick={() => void handleRetryActiveRender()}
-                      type="button"
-                    >
-                      <RotateCcw aria-hidden="true" size={14} strokeWidth={1.9} />
-                      <span>Retry</span>
-                    </button>
-                  ) : null}
-                </div>
-              </div>
-
-              <div className="result-media-frame">
-                {currentResult.kind === "image" ? (
-                  <img alt={currentResult.prompt} src={currentResult.src} />
-                ) : null}
-                {currentResult.kind === "video" ? (
-                  <video controls playsInline src={currentResult.src} />
-                ) : null}
-              </div>
-            </section>
-          ) : null}
-
-          {surfaceState === "failed" && activeRender ? (
-            <section className="failed-card">
-              <div className="failed-card-head">
-                <div>
-                  <h2>{activeRender.prompt}</h2>
-                  <div className="result-meta">
-                    <span>{activeRender.modelId}</span>
-                    <span>{activeRender.workflowType}</span>
-                  </div>
-                </div>
-                <div className="result-card-actions">
-                  <div className="failed-status">Failed</div>
-                  <button
-                    className="button-secondary"
-                    onClick={() => void handleRetryActiveRender()}
-                    type="button"
-                  >
-                    <RotateCcw aria-hidden="true" size={14} strokeWidth={1.9} />
-                    <span>Retry</span>
-                  </button>
-                </div>
-              </div>
-              <div className="failed-message">
-                {activeRender.failureMessage || "This render failed before completion."}
               </div>
             </section>
           ) : null}
@@ -2678,8 +3054,13 @@ export function StudioApp({
                     onClick={() => setIsModelMenuOpen((current) => !current)}
                     type="button"
                   >
-                    <span className="model-trigger-label">
-                      {selectedModelOption?.name || selectedModel || "Select model"}
+                    <span className="model-trigger-copy">
+                      <span className="model-trigger-label">
+                        {selectedModelOption?.name || selectedModel || "Select model"}
+                      </span>
+                      {selectedModelPricingSummary ? (
+                        <span className="model-trigger-price">{selectedModelPricingSummary}</span>
+                      ) : null}
                     </span>
                     <ChevronDown
                       aria-hidden="true"
@@ -2722,6 +3103,11 @@ export function StudioApp({
                           >
                             <div className="model-menu-copy">
                               <div className="model-menu-name">{model.name || model.id}</div>
+                              {getModelPricingSummary(model) ? (
+                                <div className="model-menu-price">
+                                  {getModelPricingSummary(model)}
+                                </div>
+                              ) : null}
                             </div>
                             <div className="model-menu-check">
                               {isActive ? (

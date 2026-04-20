@@ -11,7 +11,13 @@ const FREE_MODELS_ROUTER = {
   id: "openrouter/free",
   name: "Free Models Router",
   description: "Routes text requests to currently available free models on OpenRouter.",
-  providerType: "text"
+  providerType: "text",
+  pricingPrompt: null,
+  pricingCompletion: null,
+  pricingRequest: null,
+  pricingImage: null,
+  pricingSkus: null,
+  pricingNote: "Free models only"
 } as const;
 
 const AUTO_MODELS_ROUTER_ID = "openrouter/auto";
@@ -53,7 +59,12 @@ export async function POST(request: NextRequest) {
           id: model.id,
           name: model.name || model.id,
           description: model.description || "Video generation model",
-          providerType: "video"
+          providerType: "video",
+          pricingPrompt: null,
+          pricingCompletion: null,
+          pricingRequest: null,
+          pricingImage: null,
+          pricingSkus: model.pricing_skus ?? null
         })))
       });
     }
@@ -64,7 +75,16 @@ export async function POST(request: NextRequest) {
       id: model.id,
       name: model.name || model.id,
       description: model.description || `${type} generation model`,
-      providerType: type
+      providerType: type,
+      pricingPrompt: model.pricing?.prompt ?? null,
+      pricingCompletion: model.pricing?.completion ?? null,
+      pricingRequest: model.pricing?.request ?? null,
+      pricingImage: model.pricing?.image ?? null,
+      pricingSkus: null,
+      pricingNote:
+        model.id === AUTO_MODELS_ROUTER_ID
+          ? "Routing-dependent pricing"
+          : undefined
     }));
 
     if (type === "text" && !models.some((model) => model.id === FREE_MODELS_ROUTER.id)) {

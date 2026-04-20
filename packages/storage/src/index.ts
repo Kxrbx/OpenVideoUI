@@ -17,6 +17,7 @@ type StoreAssetInput = {
   source: string;
   sourceKind: "reference" | "generated";
   fileNameHint?: string | null;
+  headers?: Record<string, string>;
 };
 
 const MIME_EXTENSION_MAP: Record<string, string> = {
@@ -62,8 +63,10 @@ function parseDataUrl(source: string) {
   };
 }
 
-async function fetchRemoteAsset(source: string) {
-  const response = await fetch(source);
+async function fetchRemoteAsset(source: string, headers?: Record<string, string>) {
+  const response = await fetch(source, {
+    headers
+  });
 
   if (!response.ok) {
     throw new Error(`Asset download failed (${response.status} ${response.statusText}).`);
@@ -94,7 +97,7 @@ export async function storeAsset(input: StoreAssetInput): Promise<StoredAsset> {
 
   const assetData = input.source.startsWith("data:")
     ? parseDataUrl(input.source)
-    : await fetchRemoteAsset(input.source);
+    : await fetchRemoteAsset(input.source, input.headers);
   const defaultExtension = input.mediaType === "video" ? "mp4" : "png";
   const extension = input.source.startsWith("data:")
     ? extensionFromMimeType(assetData.mimeType, defaultExtension)
