@@ -54,8 +54,9 @@ async function processRender(render: Awaited<ReturnType<typeof getRenderById>>) 
     return "terminal" as const;
   }
 
+  const providerJobId = render.providerJobId;
   const client = createOpenRouterClient();
-  const status = await client.getVideoGeneration(render.providerJobId);
+  const status = await client.getVideoGeneration(providerJobId);
 
   if (status.status === "completed" && (status.unsigned_urls?.length ?? 0) > 0) {
     try {
@@ -64,7 +65,7 @@ async function processRender(render: Awaited<ReturnType<typeof getRenderById>>) 
           storeAsset({
             renderId: render.id,
             mediaType: "video",
-            source: client.getVideoContentUrl(render.providerJobId, index),
+            source: client.getVideoContentUrl(providerJobId, index),
             sourceKind: "generated",
             fileNameHint: `video-${index + 1}.mp4`,
             headers: {

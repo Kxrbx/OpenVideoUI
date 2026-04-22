@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, inArray, isNotNull } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type {
   OpenRouterModel,
@@ -232,6 +232,53 @@ export async function getRecentRendersForUser(userId: string, limit = 8): Promis
     .innerJoin(projects, eq(projects.id, renders.projectId))
     .where(eq(projects.ownerId, userId))
     .orderBy(desc(renders.createdAt))
+    .limit(limit);
+}
+
+export async function getGalleryRendersForUser(
+  userId: string,
+  limit = 120
+): Promise<RenderWithProject[]> {
+  const db = getDatabaseClient();
+
+  return db
+    .select({
+      id: renders.id,
+      projectId: renders.projectId,
+      modelId: renders.modelId,
+      mediaType: renders.mediaType,
+      workflowType: renders.workflowType,
+      status: renders.status,
+      prompt: renders.prompt,
+      negativePrompt: renders.negativePrompt,
+      settings: renders.settings,
+      providerJobId: renders.providerJobId,
+      providerGenerationId: renders.providerGenerationId,
+      providerPollUrl: renders.providerPollUrl,
+      providerStatus: renders.providerStatus,
+      outputUrls: renders.outputUrls,
+      providerUsage: renders.providerUsage,
+      providerRequest: renders.providerRequest,
+      providerResponse: renders.providerResponse,
+      failureCode: renders.failureCode,
+      failureMessage: renders.failureMessage,
+      createdAt: renders.createdAt,
+      updatedAt: renders.updatedAt,
+      completedAt: renders.completedAt,
+      failedAt: renders.failedAt,
+      projectTitle: projects.title
+    })
+    .from(renders)
+    .innerJoin(projects, eq(projects.id, renders.projectId))
+    .where(
+      and(
+        eq(projects.ownerId, userId),
+        eq(renders.status, "completed"),
+        inArray(renders.mediaType, ["image", "video"]),
+        sql`jsonb_array_length(${renders.outputUrls}) > 0`
+      )
+    )
+    .orderBy(desc(renders.completedAt), desc(renders.createdAt))
     .limit(limit);
 }
 

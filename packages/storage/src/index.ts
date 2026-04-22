@@ -20,11 +20,23 @@ type StoreAssetInput = {
   headers?: Record<string, string>;
 };
 
+type StoreAssetBufferInput = {
+  renderId: string;
+  mediaType: "image" | "video";
+  sourceKind: "reference" | "generated";
+  buffer: Buffer;
+  mimeType: string;
+  fileNameHint?: string | null;
+  extensionHint?: string | null;
+};
+
 const MIME_EXTENSION_MAP: Record<string, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
+  "image/avif": "avif",
   "image/webp": "webp",
   "image/gif": "gif",
+  "image/svg+xml": "svg",
   "video/mp4": "mp4",
   "video/webm": "webm",
   "video/quicktime": "mov"
@@ -91,29 +103,60 @@ function inferExtensionFromSource(source: string, fallback: string) {
   }
 }
 
-export async function storeAsset(input: StoreAssetInput): Promise<StoredAsset> {
+function inferExtensionFromFileName(fileName: string | null | undefined) {
+  if (!fileName) {
+    return null;
+  }
+
+  const extension = path.extname(fileName);
+  return extension ? extension.replace(/^\./, "") : null;
+}
+
+async function writeStoredAsset(input: StoreAssetBufferInput): Promise<StoredAsset> {
   const root = getStorageRoot();
   await mkdir(root, { recursive: true });
 
-  const assetData = input.source.startsWith("data:")
-    ? parseDataUrl(input.source)
-    : await fetchRemoteAsset(input.source, input.headers);
   const defaultExtension = input.mediaType === "video" ? "mp4" : "png";
-  const extension = input.source.startsWith("data:")
-    ? extensionFromMimeType(assetData.mimeType, defaultExtension)
-    : inferExtensionFromSource(input.source, extensionFromMimeType(assetData.mimeType, defaultExtension));
+  const extension =
+    inferExtensionFromFileName(input.fileNameHint) ||
+    input.extensionHint ||
+    extensionFromMimeType(input.mimeType, defaultExtension);
   const storageKey = `${input.mediaType}-${input.sourceKind}-${input.renderId}-${randomUUID()}.${extension}`;
   const filePath = path.join(root, storageKey);
 
-  await writeFile(filePath, assetData.buffer);
+  await writeFile(filePath, input.buffer);
 
   return {
     storageKey,
     fileName: input.fileNameHint || storageKey,
-    mimeType: mimeTypeFromExtension(extension, assetData.mimeType),
-    fileSize: assetData.buffer.byteLength,
+    mimeType: mimeTypeFromExtension(extension, input.mimeType),
+    fileSize: input.buffer.byteLength,
     publicUrl: buildPublicUrl(storageKey)
   };
+}
+
+export async function storeAsset(input: StoreAssetInput): Promise<StoredAsset> {
+  const assetData = input.source.startsWith("data:")
+    ? parseDataUrl(input.source)
+    : await fetchRemoteAsset(input.source, input.headers);
+  const defaultExtension = input.mediaType === "video" ? "mp4" : "png";
+  const sourceExtension = input.source.startsWith("data:")
+    ? extensionFromMimeType(assetData.mimeType, defaultExtension)
+    : inferExtensionFromSource(input.source, extensionFromMimeType(assetData.mimeType, defaultExtension));
+
+  return writeStoredAsset({
+    renderId: input.renderId,
+    mediaType: input.mediaType,
+    sourceKind: input.sourceKind,
+    buffer: assetData.buffer,
+    mimeType: assetData.mimeType,
+    fileNameHint: input.fileNameHint,
+    extensionHint: sourceExtension
+  });
+}
+
+export async function storeAssetBuffer(input: StoreAssetBufferInput): Promise<StoredAsset> {
+  return writeStoredAsset(input);
 }
 
 export async function readStoredAsset(storageKey: string) {

@@ -6,10 +6,12 @@ import {
   Check,
   ChevronDown,
   Download,
+  ExternalLink,
   Folder,
   History,
   House,
   Image,
+  Images,
   KeyRound,
   Link as LinkIcon,
   MessageSquare,
@@ -38,7 +40,11 @@ import {
 
 type Mode = "image" | "video" | "text";
 type SurfaceState = "idle" | "generating" | "result" | "failed";
+type ActiveView = "studio" | "gallery";
+type GalleryFilter = "all" | "image" | "video";
 type VideoWorkflow = "text-to-video" | "image-to-video";
+type BackgroundMediaType = "image" | "video";
+type BackgroundRenderAs = "embed" | BackgroundMediaType;
 
 type Project = {
   id: string;
@@ -115,13 +121,14 @@ type LocalSettings = {
   defaultModel?: string;
   selectedModels?: Partial<Record<Mode, string>>;
   backgroundUrl?: string;
+  backgroundMediaType?: BackgroundMediaType;
   sidebarCollapsed?: boolean;
   selectedProjectId?: string;
 };
 
 type BackgroundSource = {
   origin: "default" | "url" | "file";
-  renderAs: "embed" | "video";
+  renderAs: BackgroundRenderAs;
   src: string;
   label: string;
 };
@@ -189,6 +196,11 @@ const TEXT_LOADING_LINES = [
   "Following the thread...",
   "Composing the next reply...",
   "Refining the response..."
+];
+const GALLERY_FILTERS: { id: GalleryFilter; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "image", label: "Images" },
+  { id: "video", label: "Videos" }
 ];
 const IDLE_TITLES: Record<Mode, string> = {
   image: "Frame something striking.",
@@ -300,6 +312,50 @@ function extractYouTubeVideoId(url: URL) {
   return null;
 }
 
+function getMediaTypeFromMimeType(mimeType: string): BackgroundMediaType | null {
+  if (mimeType.startsWith("image/")) {
+    return "image";
+  }
+
+  if (mimeType.startsWith("video/")) {
+    return "video";
+  }
+
+  return null;
+}
+
+function getMediaTypeFromFileName(fileName: string): BackgroundMediaType | null {
+  const extension = fileName.split(".").pop()?.toLowerCase();
+
+  if (!extension) {
+    return null;
+  }
+
+  if (["avif", "gif", "jpeg", "jpg", "png", "svg", "webp"].includes(extension)) {
+    return "image";
+  }
+
+  if (["m4v", "mov", "mp4", "ogg", "ogv", "webm"].includes(extension)) {
+    return "video";
+  }
+
+  return null;
+}
+
+function getMediaTypeFromAssetUrl(url: URL): BackgroundMediaType | null {
+  const storageKey = decodeURIComponent(url.pathname.split("/").pop() || "");
+
+  if (storageKey.startsWith("image-")) {
+    return "image";
+  }
+
+  if (storageKey.startsWith("video-")) {
+    return "video";
+  }
+
+  return getMediaTypeFromFileName(storageKey);
+}
+
 function resolveBackgroundUrl(value: string): BackgroundSource | null {
   const trimmed = value.trim();
 
@@ -314,9 +370,11 @@ function resolveBackgroundUrl(value: string): BackgroundSource | null {
     const parts = url.pathname.split("/").filter(Boolean);
 
     if (url.pathname.startsWith("/api/assets/")) {
+      const mediaType = getMediaTypeFromAssetUrl(url) || "video";
+
       return {
         origin: "file",
-        renderAs: "video",
+        renderAs: mediaType,
         src: trimmed,
         label: "Saved local background"
       };
@@ -349,9 +407,11 @@ function resolveBackgroundUrl(value: string): BackgroundSource | null {
     }
 
     if (url.protocol === "http:" || url.protocol === "https:") {
+      const mediaType = getMediaTypeFromFileName(url.pathname) || "video";
+
       return {
         origin: "url",
-        renderAs: "video",
+        renderAs: mediaType,
         src: trimmed,
         label: url.hostname
       };
@@ -662,6 +722,14 @@ function buildCurrentResultFromRender(render: RenderRecord): CurrentResult | nul
   };
 }
 
+function isGalleryRenderable(render: RenderRecord) {
+  return (
+    render.status === "completed" &&
+    (render.mediaType === "image" || render.mediaType === "video") &&
+    render.outputUrls.length > 0
+  );
+}
+
 function ModeGlyph({ mode }: { mode: Mode }) {
   if (mode === "image") {
     return <Image aria-hidden="true" size={14} strokeWidth={1.9} />;
@@ -741,11 +809,13 @@ function readReferenceDataUrl(
 }
 
 export function StudioApp({
+  galleryRenders,
   initialChatSessions,
   projects,
   recentRenders,
   sessionName
 }: {
+  galleryRenders: RenderRecord[];
   initialChatSessions: ChatSession[];
   projects: Project[];
   recentRenders: RenderRecord[];
@@ -753,7 +823,11 @@ export function StudioApp({
 }) {
   const [projectList, setProjectList] = useState(projects);
   const [renderHistory, setRenderHistory] = useState(recentRenders);
+  const [galleryItems, setGalleryItems] = useState(galleryRenders);
   const [selectedProjectId, setSelectedProjectId] = useState(projects[0]?.id || "");
+  const [activeView, setActiveView] = useState<ActiveView>("studio");
+  const [selectedGalleryRender, setSelectedGalleryRender] = useState<RenderRecord | null>(null);
+  const [galleryFilter, setGalleryFilter] = useState<GalleryFilter>("all");
   const [mode, setMode] = useState<Mode>("video");
   const [videoWorkflow, setVideoWorkflow] = useState<VideoWorkflow>("text-to-video");
   const [models, setModels] = useState<ModelOption[]>([]);
@@ -787,6 +861,7 @@ export function StudioApp({
   const [backgroundUrlInput, setBackgroundUrlInput] = useState(
     normalizeBackgroundUrlInput(DEFAULT_BACKGROUND_PAGE_URL)
   );
+  const [selectedBackgroundFile, setSelectedBackgroundFile] = useState<File | null>(null);
   const [backgroundSource, setBackgroundSource] = useState<BackgroundSource>(() =>
     getDefaultBackgroundSource()
   );
@@ -804,8 +879,10 @@ export function StudioApp({
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const textChatViewportRef = useRef<HTMLDivElement | null>(null);
   const modelMenuRef = useRef<HTMLDivElement | null>(null);
+  const galleryViewerCloseRef = useRef<HTMLButtonElement | null>(null);
   const deferredPrompt = useDeferredValue(prompt);
   const settingsTitleId = "studio-settings-title";
+  const galleryViewerTitleId = "gallery-viewer-title";
 
   useEffect(() => {
     setProjectList(projects);
@@ -814,6 +891,16 @@ export function StudioApp({
   useEffect(() => {
     setRenderHistory(recentRenders);
   }, [recentRenders]);
+
+  useEffect(() => {
+    setGalleryItems(galleryRenders);
+  }, [galleryRenders]);
+
+  useEffect(() => {
+    if (activeView !== "gallery") {
+      setSelectedGalleryRender(null);
+    }
+  }, [activeView]);
 
   useEffect(() => {
     if (mode === "text") {
@@ -899,6 +986,13 @@ export function StudioApp({
         const nextBackgroundSource = resolveBackgroundUrl(parsed.backgroundUrl);
 
         if (nextBackgroundSource) {
+          if (
+            (parsed.backgroundMediaType === "image" || parsed.backgroundMediaType === "video") &&
+            nextBackgroundSource.renderAs !== "embed"
+          ) {
+            nextBackgroundSource.renderAs = parsed.backgroundMediaType;
+          }
+
           setBackgroundSource(nextBackgroundSource);
           setBackgroundUrlInput(normalizeBackgroundUrlInput(parsed.backgroundUrl));
         }
@@ -1075,6 +1169,26 @@ export function StudioApp({
     };
   }, [isModelMenuOpen]);
 
+  useEffect(() => {
+    if (!selectedGalleryRender) {
+      return;
+    }
+
+    galleryViewerCloseRef.current?.focus();
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        setSelectedGalleryRender(null);
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [selectedGalleryRender]);
+
   const selectedProject = useMemo(
     () => projectList.find((project) => project.id === selectedProjectId) || projectList[0] || null,
     [projectList, selectedProjectId]
@@ -1087,7 +1201,8 @@ export function StudioApp({
   const canCreateProject = newProjectTitle.trim().length > 0;
   const canSaveSettingsKey = settingsApiKey.trim().length > 0 && !isSavingSettings;
   const canSaveDisplayName = settingsDisplayName.trim().length > 0 && !isSavingSettings;
-  const canApplyBackgroundLink = backgroundUrlInput.trim().length > 0;
+  const canApplyBackgroundLink = backgroundUrlInput.trim().length > 0 && !isSavingSettings;
+  const canSaveBackgroundFile = Boolean(selectedBackgroundFile) && !isSavingSettings;
   const selectedModelPricingSummary = getModelPricingSummary(selectedModelOption);
   const canRecoverActiveVideo = Boolean(
     activeRender &&
@@ -1109,6 +1224,31 @@ export function StudioApp({
         .slice(0, 12),
     [chatSessions, selectedProjectId]
   );
+  const galleryRenderableItems = useMemo(
+    () => galleryItems.filter(isGalleryRenderable).slice(0, 120),
+    [galleryItems]
+  );
+  const galleryFilterCounts = useMemo(
+    () =>
+      galleryRenderableItems.reduce<Record<GalleryFilter, number>>(
+        (counts, render) => {
+          counts.all += 1;
+          counts[render.mediaType] += 1;
+          return counts;
+        },
+        { all: 0, image: 0, video: 0 }
+      ),
+    [galleryRenderableItems]
+  );
+  const visibleGalleryItems = useMemo(
+    () =>
+      galleryRenderableItems.filter(
+        (render) => galleryFilter === "all" || render.mediaType === galleryFilter
+      ),
+    [galleryFilter, galleryRenderableItems]
+  );
+  const galleryFilterLabel =
+    GALLERY_FILTERS.find((filter) => filter.id === galleryFilter)?.label || "All";
   const selectedChat = useMemo(
     () => chatSessions.find((chat) => chat.id === selectedChatId) || null,
     [chatSessions, selectedChatId]
@@ -1125,7 +1265,7 @@ export function StudioApp({
   const hasTextConversation = Boolean(
     mode === "text" && ((selectedChat?.messages.length ?? 0) > 0 || isTextResponding)
   );
-  const keepTextBackgroundVisible = hasTextConversation;
+  const keepTextBackgroundVisible = activeView === "studio" && hasTextConversation;
   const loadingLines =
     mode === "text"
       ? TEXT_LOADING_LINES
@@ -1308,23 +1448,29 @@ export function StudioApp({
     const nextBackgroundSource = resolveBackgroundUrl(backgroundUrlInput);
 
     if (!nextBackgroundSource) {
-      setError("Use a valid Streamable link or a direct video URL.");
+      setError("Use a valid YouTube, Streamable, direct video, or direct image URL.");
       return;
     }
 
     clearLocalFileUrl();
     setError("");
+    setSelectedBackgroundFile(null);
     setBackgroundSource(nextBackgroundSource);
     setSettingsNotice("Backdrop updated.");
     writeLocalSettings((current) => ({
       ...current,
-      backgroundUrl: backgroundUrlInput.trim()
+      backgroundUrl: backgroundUrlInput.trim(),
+      backgroundMediaType:
+        nextBackgroundSource.renderAs === "image" || nextBackgroundSource.renderAs === "video"
+          ? nextBackgroundSource.renderAs
+          : undefined
     }));
-    showToast("Backdrop updated", "The room picked up your new ambient video.");
+    showToast("Backdrop updated", "The room picked up your new ambient background.");
   }
 
   function resetBackgroundSource() {
     clearLocalFileUrl();
+    setSelectedBackgroundFile(null);
     setBackgroundSource(getDefaultBackgroundSource());
     setBackgroundSourceMode("link");
     setBackgroundUrlInput(DEFAULT_BACKGROUND_PAGE_URL);
@@ -1332,10 +1478,34 @@ export function StudioApp({
     writeLocalSettings((current) => {
       const next = { ...current };
       delete next.backgroundUrl;
+      delete next.backgroundMediaType;
       return next;
     });
     setSettingsNotice("Default backdrop restored.");
     showToast("Backdrop restored", "The default atmosphere is back in place.");
+  }
+
+  function handleBackgroundMediaError() {
+    if (backgroundSource.origin === "default") {
+      return;
+    }
+
+    clearLocalFileUrl();
+    setSelectedBackgroundFile(null);
+    setBackgroundSource(getDefaultBackgroundSource());
+    setBackgroundSourceMode("link");
+    setBackgroundUrlInput(DEFAULT_BACKGROUND_PAGE_URL);
+    writeLocalSettings((current) => {
+      const next = { ...current };
+      delete next.backgroundUrl;
+      delete next.backgroundMediaType;
+      return next;
+    });
+    setSettingsNotice("Selected backdrop could not be loaded. Default restored.");
+    showToast(
+      "Backdrop could not load",
+      "The selected background was restored to the default video."
+    );
   }
 
   function handleBackgroundFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -1345,66 +1515,96 @@ export function StudioApp({
       return;
     }
 
-    const reader = new FileReader();
+    const mediaType = getMediaTypeFromMimeType(file.type) || getMediaTypeFromFileName(file.name);
 
-    reader.onload = async () => {
-      if (typeof reader.result !== "string") {
-        setError("Unable to read the background video.");
-        return;
-      }
-
-      setIsSavingSettings(true);
+    if (!mediaType) {
+      setSelectedBackgroundFile(null);
       setSettingsNotice("");
-      setError("");
+      setError("Choose an image or video file for the background.");
+      return;
+    }
+
+    setSelectedBackgroundFile(file);
+    setSettingsNotice("");
+    setError("");
+  }
+
+  async function saveBackgroundFile() {
+    if (!selectedBackgroundFile) {
+      setError("Choose an image or video file first.");
+      return;
+    }
+
+    const mediaType =
+      getMediaTypeFromMimeType(selectedBackgroundFile.type) ||
+      getMediaTypeFromFileName(selectedBackgroundFile.name);
+
+    if (!mediaType) {
+      setError("Choose an image or video file for the background.");
+      return;
+    }
+
+    setIsSavingSettings(true);
+    setSettingsNotice("");
+    setError("");
+
+    try {
+      const formData = new FormData();
+      formData.set("file", selectedBackgroundFile);
+      formData.set("mediaType", mediaType);
 
       const response = await fetch("/api/backgrounds", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          fileName: file.name,
-          source: reader.result
-        })
+        body: formData
       });
 
       const payload = (await response.json().catch(() => ({}))) as {
         data?: {
           publicUrl: string;
           fileName: string;
+          mimeType?: string;
+          mediaType?: BackgroundMediaType;
         };
         error?: string;
       };
 
       if (!response.ok || !payload.data) {
-        setError(payload.error || "Unable to save the background video.");
-        setIsSavingSettings(false);
+        setError(payload.error || "Unable to save the background file.");
         return;
       }
+
+      const savedMediaType =
+        payload.data.mediaType ||
+        getMediaTypeFromMimeType(payload.data.mimeType || "") ||
+        mediaType;
 
       clearLocalFileUrl();
       setBackgroundSourceMode("file");
       setBackgroundSource({
         origin: "file",
-        renderAs: "video",
+        renderAs: savedMediaType,
         src: payload.data.publicUrl,
         label: payload.data.fileName
       });
       setBackgroundUrlInput(normalizeBackgroundUrlInput(payload.data.publicUrl));
+      setSelectedBackgroundFile(null);
       writeLocalSettings((current) => ({
         ...current,
-        backgroundUrl: payload.data!.publicUrl
+        backgroundUrl: payload.data!.publicUrl,
+        backgroundMediaType: savedMediaType
       }));
       setSettingsNotice("Local backdrop saved on this machine.");
-      showToast("Backdrop saved locally", "This ambient video will stay with the app.");
+      showToast(
+        "Backdrop saved locally",
+        savedMediaType === "image"
+          ? "This background image will stay with the app."
+          : "This ambient video will stay with the app."
+      );
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Unable to save the background file.");
+    } finally {
       setIsSavingSettings(false);
-    };
-
-    reader.onerror = () => {
-      setError("Unable to read the background video.");
-    };
-
-    reader.readAsDataURL(file);
+    }
   }
 
   async function saveOpenRouterKey() {
@@ -1666,6 +1866,7 @@ export function StudioApp({
     }
 
     upsertChatSession(nextChat);
+    setActiveView("studio");
     setSelectedChatId(nextChat.id);
     setPrompt("");
     setCurrentResult(null);
@@ -1726,6 +1927,8 @@ export function StudioApp({
 
   function handleGoHome() {
     clearPollTimer();
+    setActiveView("studio");
+    setSelectedGalleryRender(null);
     setPrompt("");
     setCurrentResult(null);
     setActiveRender(null);
@@ -1736,8 +1939,30 @@ export function StudioApp({
     setIsModelMenuOpen(false);
   }
 
+  function handleOpenGallery() {
+    setActiveView("gallery");
+    setSelectedGalleryRender(null);
+    setIsModelMenuOpen(false);
+    setError("");
+  }
+
+  function openGalleryViewer(render: RenderRecord) {
+    setSelectedGalleryRender(render);
+    setError("");
+  }
+
+  function closeGalleryViewer() {
+    setSelectedGalleryRender(null);
+  }
+
+  function handleOpenGalleryRenderInStudio(renderId: string) {
+    setSelectedGalleryRender(null);
+    void handleSelectRender(renderId);
+  }
+
   function handleModeChange(nextMode: Mode) {
     setMode(nextMode);
+    setActiveView("studio");
     setIsModelMenuOpen(false);
 
     if (nextMode === "text") {
@@ -1778,6 +2003,7 @@ export function StudioApp({
       return;
     }
 
+    setActiveView("studio");
     setSelectedChatId(chat.id);
     setSelectedProjectId(chat.projectId);
     setMode("text");
@@ -1813,10 +2039,32 @@ export function StudioApp({
 
       return [render, ...current].slice(0, 8);
     });
+
+    setGalleryItems((current) => {
+      const existingIndex = current.findIndex((item) => item.id === render.id);
+
+      if (!isGalleryRenderable(render)) {
+        return existingIndex >= 0
+          ? current.filter((item) => item.id !== render.id)
+          : current;
+      }
+
+      if (existingIndex >= 0) {
+        const next = [...current];
+        next[existingIndex] = {
+          ...next[existingIndex],
+          ...render
+        };
+        return next;
+      }
+
+      return [render, ...current].slice(0, 120);
+    });
   }
 
   async function handleSelectRender(renderId: string) {
     clearPollTimer();
+    setSelectedGalleryRender(null);
     setError("");
 
     const response = await fetch(`/api/renders/${renderId}`);
@@ -1831,6 +2079,7 @@ export function StudioApp({
     }
 
     const render = payload.data;
+    setActiveView("studio");
     setActiveRender(render);
     upsertHistoryRender(render);
     applySnapshotToComposer(buildSnapshotFromRender(render));
@@ -1952,6 +2201,7 @@ export function StudioApp({
     }
 
     clearPollTimer();
+    setActiveView("studio");
     setError("");
     setSurfaceState("generating");
     setStatusLabel(snapshot.mode === "video" ? "Submitting video render" : "Generating");
@@ -2251,6 +2501,26 @@ export function StudioApp({
     showToast("Download started", "The media is being saved locally.");
   }
 
+  function handleDownloadGalleryRender(render: RenderRecord) {
+    if (!render.outputUrls[0]) {
+      return;
+    }
+
+    const link = document.createElement("a");
+    link.href = render.outputUrls[0];
+    link.download = buildResultFileName({
+      kind: render.mediaType,
+      modelId: render.modelId,
+      prompt: render.prompt,
+      src: render.outputUrls[0]
+    });
+    link.rel = "noopener";
+    document.body.append(link);
+    link.click();
+    link.remove();
+    showToast("Download started", "The gallery item is being saved locally.");
+  }
+
   function handleRecoverActiveRender() {
     if (!activeRender || !canRecoverActiveVideo) {
       return;
@@ -2314,9 +2584,11 @@ export function StudioApp({
     }, 4000);
   }
 
+  const shellSurfaceState = activeView === "gallery" ? "idle" : surfaceState;
+
   return (
     <div
-      className={`studio-shell${isSidebarCollapsed ? " sidebar-collapsed" : ""} state-${surfaceState}${keepTextBackgroundVisible ? " text-result-background" : ""}`}
+      className={`studio-shell${isSidebarCollapsed ? " sidebar-collapsed" : ""} view-${activeView} state-${shellSurfaceState}${keepTextBackgroundVisible ? " text-result-background" : ""}`}
     >
       <aside className="studio-sidebar">
         <div className="studio-sidebar-header">
@@ -2333,7 +2605,7 @@ export function StudioApp({
             </div>
             <button
               aria-label={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
-              className="studio-mini-button"
+              className="studio-mini-button studio-sidebar-toggle"
               onClick={handleToggleSidebar}
               title={isSidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"}
               type="button"
@@ -2348,13 +2620,25 @@ export function StudioApp({
 
           <button
             aria-label="Home"
-            className={isSidebarCollapsed ? "studio-home-button collapsed" : "studio-home-button"}
+            className={`studio-home-button${isSidebarCollapsed ? " collapsed" : ""}${activeView === "studio" && surfaceState === "idle" ? " active" : ""}`}
             onClick={handleGoHome}
             title="Home"
             type="button"
           >
             <House aria-hidden="true" size={16} strokeWidth={1.9} />
             {!isSidebarCollapsed ? <span>Home</span> : null}
+          </button>
+
+          <button
+            aria-label="Gallery"
+            aria-pressed={activeView === "gallery"}
+            className={`studio-home-button${isSidebarCollapsed ? " collapsed" : ""}${activeView === "gallery" ? " active" : ""}`}
+            onClick={handleOpenGallery}
+            title="Gallery"
+            type="button"
+          >
+            <Images aria-hidden="true" size={16} strokeWidth={1.9} />
+            {!isSidebarCollapsed ? <span>Gallery</span> : null}
           </button>
         </div>
 
@@ -2538,17 +2822,30 @@ export function StudioApp({
             <iframe
               allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
               className="studio-background-embed"
+              key={backgroundSource.src}
               src={backgroundSource.src}
               tabIndex={-1}
               title="Ambient studio background"
+            />
+          ) : backgroundSource.renderAs === "image" ? (
+            <img
+              alt=""
+              aria-hidden="true"
+              className="studio-background-image"
+              key={backgroundSource.src}
+              onError={handleBackgroundMediaError}
+              src={backgroundSource.src}
             />
           ) : (
             <video
               autoPlay
               className="studio-background-video"
+              key={backgroundSource.src}
               loop
               muted
+              onError={handleBackgroundMediaError}
               playsInline
+              preload="auto"
               src={backgroundSource.src}
             />
           )}
@@ -2568,7 +2865,7 @@ export function StudioApp({
           </button>
         </div>
 
-        {surfaceState === "idle" ? (
+        {activeView === "studio" && surfaceState === "idle" ? (
           <div className="idle-session-banner">
             {sessionGreeting ? `${sessionGreeting}, ${displayName}` : displayName}
           </div>
@@ -2741,7 +3038,10 @@ export function StudioApp({
                 <div className="settings-label">Current background</div>
                 <div className="settings-current">
                   <span>{backgroundSource.label}</span>
-                  <span>{backgroundSource.origin}</span>
+                  <span>
+                    {backgroundSource.origin} ·{" "}
+                    {backgroundSource.renderAs === "embed" ? "video" : backgroundSource.renderAs}
+                  </span>
                 </div>
               </div>
 
@@ -2779,16 +3079,17 @@ export function StudioApp({
                 {backgroundSourceMode === "link" ? (
                   <div className="settings-stack">
                     <input
-                      aria-label="Background video URL"
+                      aria-label="Background media URL"
                       className="settings-input"
                       onChange={(event) => setBackgroundUrlInput(event.target.value)}
-                      placeholder="https://youtube.com/... https://streamable.com/... or https://cdn.example.com/video.mp4"
+                      placeholder="https://youtube.com/... https://streamable.com/... https://cdn.example.com/background.mp4 or .jpg"
                       value={normalizeBackgroundUrlInput(backgroundUrlInput)}
                     />
                     <div className="settings-note">
                       YouTube and Streamable links are converted to muted looping embeds.
-                      Direct video links are played as muted background video. Some YouTube
-                      videos cannot be embedded and will show a YouTube restriction screen.
+                      Direct video links play muted, and direct image links fill the background.
+                      Some YouTube videos cannot be embedded and will show a YouTube restriction
+                      screen.
                     </div>
                     <div className="settings-actions">
                       <button
@@ -2811,15 +3112,25 @@ export function StudioApp({
                 ) : (
                   <div className="settings-stack">
                     <input
-                      accept="video/*"
-                      aria-label="Local background video file"
+                      accept="image/*,video/*"
+                      aria-label="Local background image or video file"
                       className="settings-input settings-file-input"
                       onChange={handleBackgroundFileChange}
                       type="file"
                     />
+                    {selectedBackgroundFile ? (
+                      <div className="settings-current settings-file-ready">
+                        <span>{selectedBackgroundFile.name}</span>
+                        <span>
+                          {getMediaTypeFromMimeType(selectedBackgroundFile.type) ||
+                            getMediaTypeFromFileName(selectedBackgroundFile.name) ||
+                            "media"}
+                        </span>
+                      </div>
+                    ) : null}
                     <div className="settings-note">
-                      Local files are stored on this machine and remain available after
-                      restarting the app.
+                      Local images and videos are stored on this machine and remain available
+                      after restarting the app.
                     </div>
                     <div className="settings-actions">
                       <button
@@ -2828,6 +3139,14 @@ export function StudioApp({
                         type="button"
                       >
                         Use default
+                      </button>
+                      <button
+                        className="button"
+                        disabled={!canSaveBackgroundFile}
+                        onClick={() => void saveBackgroundFile()}
+                        type="button"
+                      >
+                        {isSavingSettings ? "Saving..." : "Save background"}
                       </button>
                     </div>
                   </div>
@@ -2838,8 +3157,184 @@ export function StudioApp({
         ) : null}
 
         <div
-          className={`studio-stage${mode === "text" && hasTextConversation ? " text-stage" : ""}${mode !== "text" && surfaceState !== "idle" ? " media-stage" : ""}`}
+          className={`studio-stage${activeView === "gallery" ? " gallery-stage" : ""}${activeView === "studio" && mode === "text" && hasTextConversation ? " text-stage" : ""}${activeView === "studio" && mode !== "text" && surfaceState !== "idle" ? " media-stage" : ""}`}
         >
+          {activeView === "gallery" ? (
+            <section aria-labelledby="gallery-title" className="gallery-panel">
+              <div className="gallery-head">
+                <div>
+                  <h1 id="gallery-title">Gallery</h1>
+                  <div className="gallery-kicker">All projects</div>
+                  <p>Completed images and videos from every project, gathered in one place.</p>
+                </div>
+                <div className="gallery-actions">
+                  <div aria-label="Filter gallery media" className="gallery-filter" role="group">
+                    {GALLERY_FILTERS.map((filter) => (
+                      <button
+                        aria-pressed={galleryFilter === filter.id}
+                        className={`gallery-filter-button${galleryFilter === filter.id ? " active" : ""}`}
+                        key={filter.id}
+                        onClick={() => setGalleryFilter(filter.id)}
+                        type="button"
+                      >
+                        <span>{filter.label}</span>
+                        <span className="gallery-filter-count">
+                          {galleryFilterCounts[filter.id]}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                  <div
+                    className="gallery-count"
+                    aria-label={`${visibleGalleryItems.length} ${galleryFilterLabel.toLowerCase()} gallery items`}
+                  >
+                    {visibleGalleryItems.length}
+                    <span>{galleryFilter === "all" ? "items" : galleryFilterLabel}</span>
+                  </div>
+                </div>
+              </div>
+
+              {visibleGalleryItems.length > 0 ? (
+                <div aria-label="Completed media gallery" className="gallery-grid" role="list">
+                  {visibleGalleryItems.map((render) => (
+                    <article className="gallery-card" key={render.id} role="listitem">
+                      <button
+                        aria-label={`Open ${render.mediaType} render: ${render.prompt}`}
+                        className="gallery-card-button"
+                        onClick={() => openGalleryViewer(render)}
+                        type="button"
+                      >
+                        <div className="gallery-media">
+                          {render.mediaType === "image" ? (
+                            <img alt={render.prompt} loading="lazy" src={render.outputUrls[0]} />
+                          ) : (
+                            <video
+                              aria-label={`Video preview for ${render.prompt}`}
+                              muted
+                              playsInline
+                              preload="metadata"
+                              src={render.outputUrls[0]}
+                            />
+                          )}
+                        </div>
+                        <div className="gallery-card-body">
+                          <div className="gallery-card-title">{render.prompt}</div>
+                          <div className="gallery-card-meta">
+                            <span>{render.projectTitle || "Project"}</span>
+                            <span>{render.mediaType}</span>
+                          </div>
+                          <div className="gallery-card-model">{render.modelId}</div>
+                        </div>
+                      </button>
+                      <button
+                        aria-label={`Download ${render.mediaType} render`}
+                        className="gallery-download"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleDownloadGalleryRender(render);
+                        }}
+                        title="Download"
+                        type="button"
+                      >
+                        <Download aria-hidden="true" size={15} strokeWidth={1.9} />
+                      </button>
+                    </article>
+                  ))}
+                </div>
+              ) : (
+                <div className="gallery-empty">
+                  <Images aria-hidden="true" size={28} strokeWidth={1.7} />
+                  <div>
+                    {galleryRenderableItems.length > 0
+                      ? `No ${galleryFilterLabel.toLowerCase()} in this gallery yet.`
+                      : "Completed images and videos will appear here after generation."}
+                  </div>
+                </div>
+              )}
+
+              {selectedGalleryRender ? (
+                <div className="gallery-viewer-backdrop" onClick={closeGalleryViewer}>
+                  <section
+                    aria-labelledby={galleryViewerTitleId}
+                    aria-modal="true"
+                    className="gallery-viewer"
+                    onClick={(event) => event.stopPropagation()}
+                    role="dialog"
+                  >
+                    <div className="gallery-viewer-media">
+                      {selectedGalleryRender.mediaType === "image" ? (
+                        <img
+                          alt={selectedGalleryRender.prompt}
+                          src={selectedGalleryRender.outputUrls[0]}
+                        />
+                      ) : (
+                        <video
+                          controls
+                          playsInline
+                          src={selectedGalleryRender.outputUrls[0]}
+                        />
+                      )}
+                    </div>
+
+                    <aside className="gallery-viewer-details">
+                      <div className="gallery-viewer-topline">
+                        <span>{selectedGalleryRender.mediaType} render</span>
+                        <button
+                          aria-label="Close gallery preview"
+                          className="gallery-viewer-close"
+                          ref={galleryViewerCloseRef}
+                          onClick={closeGalleryViewer}
+                          type="button"
+                        >
+                          <X aria-hidden="true" size={18} strokeWidth={1.9} />
+                        </button>
+                      </div>
+
+                      <section className="gallery-viewer-prompt" aria-labelledby={galleryViewerTitleId}>
+                        <div className="gallery-viewer-section-label">Prompt</div>
+                        <h2 id={galleryViewerTitleId}>{selectedGalleryRender.prompt}</h2>
+                      </section>
+
+                      <dl className="gallery-viewer-meta">
+                        <div>
+                          <dt>Project</dt>
+                          <dd>{selectedGalleryRender.projectTitle || "Project"}</dd>
+                        </div>
+                        <div>
+                          <dt>Model</dt>
+                          <dd>{selectedGalleryRender.modelId}</dd>
+                        </div>
+                        <div>
+                          <dt>Workflow</dt>
+                          <dd>{selectedGalleryRender.workflowType}</dd>
+                        </div>
+                      </dl>
+
+                      <div className="gallery-viewer-actions">
+                        <button
+                          className="button-secondary"
+                          onClick={() => handleDownloadGalleryRender(selectedGalleryRender)}
+                          type="button"
+                        >
+                          <Download aria-hidden="true" size={15} strokeWidth={1.9} />
+                          <span>Download</span>
+                        </button>
+                        <button
+                          className="button-secondary"
+                          onClick={() => handleOpenGalleryRenderInStudio(selectedGalleryRender.id)}
+                          type="button"
+                        >
+                          <ExternalLink aria-hidden="true" size={15} strokeWidth={1.9} />
+                          <span>Open in Studio</span>
+                        </button>
+                      </div>
+                    </aside>
+                  </section>
+                </div>
+              ) : null}
+            </section>
+          ) : (
+            <>
           {mode !== "text" && surfaceState !== "idle" ? (
             <div className="studio-output-slot">
               {surfaceState === "generating" ? (
@@ -3235,6 +3730,8 @@ export function StudioApp({
           </section>
 
           {error ? <div className="studio-error">{error}</div> : null}
+            </>
+          )}
         </div>
       </main>
     </div>

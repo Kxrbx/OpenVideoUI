@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import {
+  getGalleryRendersForUser,
   getProjectsForUser,
   getRecentRendersForUser,
   getTextChatsForUser
@@ -14,9 +15,10 @@ export default async function HomePage() {
     redirect("/sign-in");
   }
 
-  const [projects, recentRenders, textChats] = await Promise.all([
+  const [projects, recentRenders, galleryRenders, textChats] = await Promise.all([
     getProjectsForUser(session.id),
     getRecentRendersForUser(session.id),
+    getGalleryRendersForUser(session.id),
     getTextChatsForUser(session.id)
   ]);
 
@@ -28,6 +30,7 @@ export default async function HomePage() {
   return (
     <StudioApp
       initialChatSessions={chatSessions}
+      galleryRenders={galleryRenders}
       projects={projects}
       recentRenders={recentRenders}
       sessionName={session.name}
