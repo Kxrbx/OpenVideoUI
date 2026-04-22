@@ -24,6 +24,7 @@ export default async function HomePage() {
 
   const chatSessions = textChats.map((chat) => ({
     ...chat,
+    hasLoadedMessages: false,
     updatedAt: chat.updatedAt.toISOString()
   }));
 

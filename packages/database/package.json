@@ -10,7 +10,7 @@
   "dependencies": {
     "@openvideoui/openrouter": "*",
     "@openvideoui/shared": "*",
-    "drizzle-orm": "^0.44.2",
+    "drizzle-orm": "^0.45.2",
     "pg": "^8.16.3"
   },
   "devDependencies": {

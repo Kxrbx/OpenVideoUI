@@ -18,6 +18,7 @@ const workerService = studioInfrastructure.find((service) => service.name === "W
 const POLL_INTERVAL_MS = 15_000;
 const RETRY_DELAY_MS = 30_000;
 const MAX_CLAIMS_PER_CYCLE = 8;
+const MAX_RENDER_POLL_CONCURRENCY = 4;
 let queue = createRenderQueueClient();
 
 function logStartup() {
@@ -76,6 +77,7 @@ async function processRender(render: Awaited<ReturnType<typeof getRenderById>>) 
       );
 
       await syncVideoRenderFromProvider(render.id, status, storedOutputs);
+      return "terminal" as const;
     } catch (storageError) {
       console.warn(
         `[worker] local video asset storage failed for ${render.id}; falling back to provider URLs`,
@@ -163,37 +165,64 @@ async function pollInFlightVideoRenders() {
 
   console.log(`[worker] queue poll cycle - claimed ${claimedIds.length} render(s)`);
 
-  for (const renderId of claimedIds) {
-    try {
-      const render = await getRenderById(renderId);
+  await runWithConcurrency(claimedIds, MAX_RENDER_POLL_CONCURRENCY, processClaimedRender);
+}
 
-      if (!render || !render.providerJobId || render.mediaType !== "video") {
-        await queue.completeRender(renderId);
-        continue;
-      }
+async function processClaimedRender(renderId: string) {
+  if (!queue) {
+    return;
+  }
 
-      if (render.status === "completed" || render.status === "failed" || render.status === "canceled") {
-        await queue.completeRender(renderId);
-        continue;
-      }
+  try {
+    const render = await getRenderById(renderId);
 
-      const result = await processRender(render);
+    if (!render || !render.providerJobId || render.mediaType !== "video") {
+      await queue.completeRender(renderId);
+      return;
+    }
 
-      if (result === "terminal") {
-        await queue.completeRender(render.id);
-      } else {
-        await queue.releaseRenderClaim(render.id, POLL_INTERVAL_MS);
-      }
+    if (render.status === "completed" || render.status === "failed" || render.status === "canceled") {
+      await queue.completeRender(renderId);
+      return;
+    }
 
-      console.log(`[worker] render ${render.id} processed from queue`);
-    } catch (error) {
-      console.error(
-        `[worker] render ${renderId} polling failed`,
-        error instanceof Error ? error.message : error
-      );
-      await queue.releaseRenderClaim(renderId, RETRY_DELAY_MS);
+    const result = await processRender(render);
+
+    if (result === "terminal") {
+      await queue.completeRender(render.id);
+    } else {
+      await queue.releaseRenderClaim(render.id, POLL_INTERVAL_MS);
+    }
+
+    console.log(`[worker] render ${render.id} processed from queue`);
+  } catch (error) {
+    console.error(
+      `[worker] render ${renderId} polling failed`,
+      error instanceof Error ? error.message : error
+    );
+    await queue.releaseRenderClaim(renderId, RETRY_DELAY_MS);
+  }
+}
+
+async function runWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  task: (item: T) => Promise<void>
+) {
+  const executing = new Set<Promise<void>>();
+
+  for (const item of items) {
+    const promise = task(item).finally(() => {
+      executing.delete(promise);
+    });
+    executing.add(promise);
+
+    if (executing.size >= concurrency) {
+      await Promise.race(executing);
     }
   }
+
+  await Promise.all(executing);
 }
 
 async function main() {

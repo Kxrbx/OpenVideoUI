@@ -1,6 +1,7 @@
 import { relations } from "drizzle-orm";
 import {
   boolean,
+  index,
   jsonb,
   pgEnum,
   pgTable,
@@ -9,6 +10,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 
 export const mediaTypeEnum = pgEnum("media_type", ["image", "video"]);
 export const workflowTypeEnum = pgEnum("workflow_type", [
@@ -33,45 +35,61 @@ export const users = pgTable("users", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
 });
 
-export const projects = pgTable("projects", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  ownerId: uuid("owner_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  title: varchar("title", { length: 180 }).notNull(),
-  description: text("description"),
-  tags: jsonb("tags").$type<string[]>().notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
-});
+export const projects = pgTable(
+  "projects",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    ownerId: uuid("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 180 }).notNull(),
+    description: text("description"),
+    tags: jsonb("tags").$type<string[]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+  },
+  (table) => [
+    index("projects_owner_updated_idx").on(table.ownerId, table.updatedAt)
+  ]
+);
 
-export const renders = pgTable("renders", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  projectId: uuid("project_id")
-    .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
-  modelId: varchar("model_id", { length: 255 }).notNull(),
-  mediaType: mediaTypeEnum("media_type").notNull(),
-  workflowType: workflowTypeEnum("workflow_type").notNull(),
-  status: renderStatusEnum("status").notNull(),
-  prompt: text("prompt").notNull(),
-  negativePrompt: text("negative_prompt"),
-  settings: jsonb("settings").$type<Record<string, unknown>>().notNull(),
-  providerJobId: varchar("provider_job_id", { length: 255 }),
-  providerGenerationId: varchar("provider_generation_id", { length: 255 }),
-  providerPollUrl: text("provider_poll_url"),
-  providerStatus: varchar("provider_status", { length: 64 }),
-  outputUrls: jsonb("output_urls").$type<string[]>().notNull(),
-  providerUsage: jsonb("provider_usage").$type<Record<string, unknown>>(),
-  providerRequest: jsonb("provider_request").$type<Record<string, unknown>>(),
-  providerResponse: jsonb("provider_response").$type<Record<string, unknown>>(),
-  failureCode: varchar("failure_code", { length: 120 }),
-  failureMessage: text("failure_message"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-  completedAt: timestamp("completed_at", { withTimezone: true }),
-  failedAt: timestamp("failed_at", { withTimezone: true })
-});
+export const renders = pgTable(
+  "renders",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    modelId: varchar("model_id", { length: 255 }).notNull(),
+    mediaType: mediaTypeEnum("media_type").notNull(),
+    workflowType: workflowTypeEnum("workflow_type").notNull(),
+    status: renderStatusEnum("status").notNull(),
+    prompt: text("prompt").notNull(),
+    negativePrompt: text("negative_prompt"),
+    settings: jsonb("settings").$type<Record<string, unknown>>().notNull(),
+    providerJobId: varchar("provider_job_id", { length: 255 }),
+    providerGenerationId: varchar("provider_generation_id", { length: 255 }),
+    providerPollUrl: text("provider_poll_url"),
+    providerStatus: varchar("provider_status", { length: 64 }),
+    outputUrls: jsonb("output_urls").$type<string[]>().notNull(),
+    providerUsage: jsonb("provider_usage").$type<Record<string, unknown>>(),
+    providerRequest: jsonb("provider_request").$type<Record<string, unknown>>(),
+    providerResponse: jsonb("provider_response").$type<Record<string, unknown>>(),
+    failureCode: varchar("failure_code", { length: 120 }),
+    failureMessage: text("failure_message"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+    completedAt: timestamp("completed_at", { withTimezone: true }),
+    failedAt: timestamp("failed_at", { withTimezone: true })
+  },
+  (table) => [
+    index("renders_project_created_idx").on(table.projectId, table.createdAt),
+    index("renders_project_completed_idx").on(table.projectId, table.completedAt, table.createdAt),
+    index("renders_pollable_video_idx")
+      .on(table.status, table.mediaType, table.updatedAt)
+      .where(sql`${table.providerJobId} is not null`)
+  ]
+);
 
 export const sessions = pgTable("sessions", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -83,19 +101,25 @@ export const sessions = pgTable("sessions", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull()
 });
 
-export const textChats = pgTable("text_chats", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  projectId: uuid("project_id")
-    .notNull()
-    .references(() => projects.id, { onDelete: "cascade" }),
-  modelId: varchar("model_id", { length: 255 }).notNull(),
-  title: varchar("title", { length: 180 }).notNull(),
-  messages: jsonb("messages")
-    .$type<Array<{ id: string; role: "user" | "assistant"; content: string }>>()
-    .notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
-});
+export const textChats = pgTable(
+  "text_chats",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    modelId: varchar("model_id", { length: 255 }).notNull(),
+    title: varchar("title", { length: 180 }).notNull(),
+    messages: jsonb("messages")
+      .$type<Array<{ id: string; role: "user" | "assistant"; content: string }>>()
+      .notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+  },
+  (table) => [
+    index("text_chats_project_updated_idx").on(table.projectId, table.updatedAt)
+  ]
+);
 
 export const modelCapabilities = pgTable("model_capabilities", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -249,6 +273,11 @@ export type RenderWithProject = Render & {
 
 export type TextChatWithProject = TextChat & {
   projectTitle: string;
+};
+
+export type TextChatListItemWithProject = Omit<TextChatWithProject, "messages"> & {
+  messages: [];
+  messageCount: number;
 };
 
 export type RenderWithDetails = RenderWithProject & {

@@ -24,6 +24,7 @@ import {
   sessions,
   textChats,
   type TextChatWithProject,
+  type TextChatListItemWithProject,
   users
 } from "./schema";
 
@@ -218,8 +219,8 @@ export async function getRecentRendersForUser(userId: string, limit = 8): Promis
       providerStatus: renders.providerStatus,
       outputUrls: renders.outputUrls,
       providerUsage: renders.providerUsage,
-      providerRequest: renders.providerRequest,
-      providerResponse: renders.providerResponse,
+      providerRequest: sql<null>`null`,
+      providerResponse: sql<null>`null`,
       failureCode: renders.failureCode,
       failureMessage: renders.failureMessage,
       createdAt: renders.createdAt,
@@ -258,8 +259,8 @@ export async function getGalleryRendersForUser(
       providerStatus: renders.providerStatus,
       outputUrls: renders.outputUrls,
       providerUsage: renders.providerUsage,
-      providerRequest: renders.providerRequest,
-      providerResponse: renders.providerResponse,
+      providerRequest: sql<null>`null`,
+      providerResponse: sql<null>`null`,
       failureCode: renders.failureCode,
       failureMessage: renders.failureMessage,
       createdAt: renders.createdAt,
@@ -335,10 +336,40 @@ export async function createProjectForUser(input: {
   };
 }
 
-export async function getTextChatsForUser(userId: string): Promise<TextChatWithProject[]> {
+export async function getTextChatsForUser(userId: string): Promise<TextChatListItemWithProject[]> {
   const db = getDatabaseClient();
 
-  return db
+  const rows = await db
+    .select({
+      id: textChats.id,
+      projectId: textChats.projectId,
+      modelId: textChats.modelId,
+      title: textChats.title,
+      messages: sql<[] | string>`'[]'::jsonb`,
+      messageCount: sql<number | string>`jsonb_array_length(${textChats.messages})`,
+      createdAt: textChats.createdAt,
+      updatedAt: textChats.updatedAt,
+      projectTitle: projects.title
+    })
+    .from(textChats)
+    .innerJoin(projects, eq(projects.id, textChats.projectId))
+    .where(eq(projects.ownerId, userId))
+    .orderBy(desc(textChats.updatedAt));
+
+  return rows.map((row) => ({
+    ...row,
+    messages: [],
+    messageCount: Number(row.messageCount)
+  }));
+}
+
+export async function getTextChatForUser(input: {
+  ownerId: string;
+  chatId: string;
+}): Promise<TextChatWithProject | null> {
+  const db = getDatabaseClient();
+
+  const rows = await db
     .select({
       id: textChats.id,
       projectId: textChats.projectId,
@@ -351,8 +382,10 @@ export async function getTextChatsForUser(userId: string): Promise<TextChatWithP
     })
     .from(textChats)
     .innerJoin(projects, eq(projects.id, textChats.projectId))
-    .where(eq(projects.ownerId, userId))
-    .orderBy(desc(textChats.updatedAt));
+    .where(and(eq(textChats.id, input.chatId), eq(projects.ownerId, input.ownerId)))
+    .limit(1);
+
+  return rows[0] ?? null;
 }
 
 export async function createTextChatForUser(input: {

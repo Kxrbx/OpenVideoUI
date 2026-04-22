@@ -5,9 +5,9 @@ services:
     environment:
       POSTGRES_DB: studio
       POSTGRES_USER: studio
-      POSTGRES_PASSWORD: studio
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openvideoui-local-password}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
@@ -15,7 +15,7 @@ services:
     image: redis:7-alpine
     container_name: openvideoui-redis
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"
     volumes:
       - redis_data:/data
 
@@ -27,7 +27,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://studio:studio@postgres:5432/studio}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://studio:${POSTGRES_PASSWORD:-openvideoui-local-password}@postgres:5432/studio}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
     ports:
@@ -49,7 +49,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: ${DATABASE_URL:-postgresql://studio:studio@postgres:5432/studio}
+      DATABASE_URL: ${DATABASE_URL:-postgresql://studio:${POSTGRES_PASSWORD:-openvideoui-local-password}@postgres:5432/studio}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
     depends_on:
       - postgres

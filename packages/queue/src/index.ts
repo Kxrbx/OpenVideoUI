@@ -5,6 +5,12 @@ import { readRuntimeEnv } from "@openvideoui/shared";
 const POLL_QUEUE_KEY = "openvideoui:video-poll-queue";
 const LOCK_PREFIX = "openvideoui:render-lock:";
 const HEARTBEAT_PREFIX = "openvideoui:worker-heartbeat:";
+const RELEASE_LOCK_SCRIPT = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("del", KEYS[1])
+end
+return 0
+`;
 
 export type RenderQueueClient = {
   workerId: string;
@@ -38,22 +44,30 @@ export function createRenderQueueClient(redisUrl?: string): RenderQueueClient | 
     return null;
   }
 
+  const redisClient = client;
   const workerId = randomUUID();
+
+  async function releaseOwnedLock(renderId: string) {
+    await redisClient.eval(RELEASE_LOCK_SCRIPT, {
+      keys: [`${LOCK_PREFIX}${renderId}`],
+      arguments: [workerId]
+    });
+  }
 
   return {
     workerId,
     async connect() {
-      if (!client.isOpen) {
-        await client.connect();
+      if (!redisClient.isOpen) {
+        await redisClient.connect();
       }
     },
     async disconnect() {
-      if (client.isOpen) {
-        await client.quit();
+      if (redisClient.isOpen) {
+        await redisClient.quit();
       }
     },
     async markHeartbeat() {
-      await client.set(`${HEARTBEAT_PREFIX}${workerId}`, new Date().toISOString(), {
+      await redisClient.set(`${HEARTBEAT_PREFIX}${workerId}`, new Date().toISOString(), {
         expiration: {
           type: "EX",
           value: 90
@@ -61,7 +75,7 @@ export function createRenderQueueClient(redisUrl?: string): RenderQueueClient | 
       });
     },
     async enqueueRenderPoll(renderId: string, delayMs = 0) {
-      await client.zAdd(POLL_QUEUE_KEY, [
+      await redisClient.zAdd(POLL_QUEUE_KEY, [
         {
           score: Date.now() + delayMs,
           value: renderId
@@ -73,7 +87,7 @@ export function createRenderQueueClient(redisUrl?: string): RenderQueueClient | 
         return;
       }
 
-      await client.zAdd(
+      await redisClient.zAdd(
         POLL_QUEUE_KEY,
         renderIds.map((renderId) => ({
           score: Date.now() + delayMs,
@@ -82,7 +96,7 @@ export function createRenderQueueClient(redisUrl?: string): RenderQueueClient | 
       );
     },
     async claimDueRenderIds(limit = 10, lockSeconds = 45) {
-      const dueIds = await client.zRangeByScore(POLL_QUEUE_KEY, 0, Date.now(), {
+      const dueIds = await redisClient.zRangeByScore(POLL_QUEUE_KEY, 0, Date.now(), {
         LIMIT: {
           offset: 0,
           count: limit
@@ -91,7 +105,7 @@ export function createRenderQueueClient(redisUrl?: string): RenderQueueClient | 
       const claimed: string[] = [];
 
       for (const renderId of dueIds) {
-        const didAcquire = await client.set(`${LOCK_PREFIX}${renderId}`, workerId, {
+        const didAcquire = await redisClient.set(`${LOCK_PREFIX}${renderId}`, workerId, {
           NX: true,
           expiration: {
             type: "EX",
@@ -103,15 +117,15 @@ export function createRenderQueueClient(redisUrl?: string): RenderQueueClient | 
           continue;
         }
 
-        await client.zRem(POLL_QUEUE_KEY, renderId);
+        await redisClient.zRem(POLL_QUEUE_KEY, renderId);
         claimed.push(renderId);
       }
 
       return claimed;
     },
     async releaseRenderClaim(renderId: string, nextDelayMs = 15_000) {
-      await client.del(`${LOCK_PREFIX}${renderId}`);
-      await client.zAdd(POLL_QUEUE_KEY, [
+      await releaseOwnedLock(renderId);
+      await redisClient.zAdd(POLL_QUEUE_KEY, [
         {
           score: Date.now() + nextDelayMs,
           value: renderId
@@ -119,8 +133,8 @@ export function createRenderQueueClient(redisUrl?: string): RenderQueueClient | 
       ]);
     },
     async completeRender(renderId: string) {
-      await client.del(`${LOCK_PREFIX}${renderId}`);
-      await client.zRem(POLL_QUEUE_KEY, renderId);
+      await releaseOwnedLock(renderId);
+      await redisClient.zRem(POLL_QUEUE_KEY, renderId);
     }
   };
 }

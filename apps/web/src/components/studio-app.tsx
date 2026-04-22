@@ -161,6 +161,8 @@ type ChatSession = {
   title: string;
   modelId: string;
   messages: ChatMessage[];
+  messageCount?: number;
+  hasLoadedMessages?: boolean;
   updatedAt: string;
 };
 
@@ -869,6 +871,7 @@ export function StudioApp({
   const [chatSessions, setChatSessions] = useState(initialChatSessions);
   const [selectedChatId, setSelectedChatId] = useState("");
   const [isTextResponding, setIsTextResponding] = useState(false);
+  const [loadingChatId, setLoadingChatId] = useState("");
   const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [toast, setToast] = useState<StudioToast | null>(null);
@@ -1253,6 +1256,7 @@ export function StudioApp({
     () => chatSessions.find((chat) => chat.id === selectedChatId) || null,
     [chatSessions, selectedChatId]
   );
+  const selectedChatMessageCount = selectedChat?.messageCount ?? selectedChat?.messages.length ?? 0;
 
   const canUseImageGuidance = Boolean(
     mode === "video" &&
@@ -1263,7 +1267,8 @@ export function StudioApp({
   const imageGuidanceMode =
     canUseImageGuidance && videoWorkflow === "image-to-video" ? "image-to-video" : "text-to-video";
   const hasTextConversation = Boolean(
-    mode === "text" && ((selectedChat?.messages.length ?? 0) > 0 || isTextResponding)
+    mode === "text" &&
+      (selectedChatMessageCount > 0 || isTextResponding || loadingChatId === selectedChat?.id)
   );
   const keepTextBackgroundVisible = activeView === "studio" && hasTextConversation;
   const loadingLines =
@@ -1784,7 +1789,11 @@ export function StudioApp({
       throw new Error(payload.error || "Unable to create the chat.");
     }
 
-    return payload.data;
+    return {
+      ...payload.data,
+      messageCount: payload.data.messages.length,
+      hasLoadedMessages: true
+    };
   }
 
   async function saveChatOnServer(chat: ChatSession) {
@@ -1809,7 +1818,46 @@ export function StudioApp({
       throw new Error(payload.error || "Unable to save the chat.");
     }
 
-    return payload.data;
+    return {
+      ...payload.data,
+      messageCount: payload.data.messages.length,
+      hasLoadedMessages: true
+    };
+  }
+
+  async function loadChatMessages(chatId: string) {
+    const chat = chatSessions.find((entry) => entry.id === chatId);
+
+    if (!chat || chat.hasLoadedMessages || chat.messages.length > 0 || loadingChatId === chatId) {
+      return chat ?? null;
+    }
+
+    setLoadingChatId(chatId);
+
+    try {
+      const response = await fetch(`/api/text-chats/${chatId}`);
+      const payload = (await response.json().catch(() => ({}))) as {
+        data?: ChatSession;
+        error?: string;
+      };
+
+      if (!response.ok || !payload.data) {
+        throw new Error(payload.error || "Unable to load the chat.");
+      }
+
+      const loadedChat = {
+        ...payload.data,
+        messageCount: payload.data.messages.length,
+        hasLoadedMessages: true
+      };
+      upsertChatSession(loadedChat);
+      return loadedChat;
+    } catch (chatError) {
+      setError(chatError instanceof Error ? chatError.message : "Unable to load the chat.");
+      return null;
+    } finally {
+      setLoadingChatId((current) => (current === chatId ? "" : current));
+    }
   }
 
   async function ensureSelectedChatSession(snapshot: GenerationSnapshot) {
@@ -1817,6 +1865,13 @@ export function StudioApp({
       selectedChat && selectedChat.projectId === snapshot.projectId ? selectedChat : null;
 
     if (existingChat) {
+      if (
+        (existingChat.messageCount ?? existingChat.messages.length) > 0 &&
+        existingChat.messages.length === 0
+      ) {
+        return (await loadChatMessages(existingChat.id)) ?? existingChat;
+      }
+
       return existingChat;
     }
 
@@ -1837,11 +1892,21 @@ export function StudioApp({
 
       if (index >= 0) {
         const next = [...current];
-        next[index] = nextChat;
+        next[index] = {
+          ...next[index],
+          ...nextChat,
+          messageCount: nextChat.messageCount ?? nextChat.messages.length
+        };
         return next;
       }
 
-      return [nextChat, ...current];
+      return [
+        {
+          ...nextChat,
+          messageCount: nextChat.messageCount ?? nextChat.messages.length
+        },
+        ...current
+      ];
     });
   }
 
@@ -2015,9 +2080,13 @@ export function StudioApp({
     setPrompt("");
     setCurrentResult(null);
     setActiveRender(null);
-    setSurfaceState(chat.messages.length > 0 ? "result" : "idle");
+    setSurfaceState((chat.messageCount ?? chat.messages.length) > 0 ? "result" : "idle");
     setStatusLabel("Ready");
     setError("");
+
+    if ((chat.messageCount ?? chat.messages.length) > 0 && chat.messages.length === 0) {
+      void loadChatMessages(chat.id);
+    }
   }
 
   function upsertHistoryRender(render: RenderRecord, options?: { incrementProjectCount?: boolean }) {
@@ -2766,7 +2835,7 @@ export function StudioApp({
                       <div className="studio-history-title">{chat.title}</div>
                       <div className="studio-history-meta">
                         <span>{chat.modelId}</span>
-                        <span>{chat.messages.length} msgs</span>
+                        <span>{chat.messageCount ?? chat.messages.length} msgs</span>
                       </div>
                     </button>
                     <button
@@ -3441,7 +3510,11 @@ export function StudioApp({
           {mode === "text" && hasTextConversation ? (
             <section className="chat-card">
               <div className="chat-viewport" ref={textChatViewportRef}>
-                {selectedChat && selectedChat.messages.length > 0 ? (
+                {selectedChat && loadingChatId === selectedChat.id ? (
+                  <div className="chat-empty-state">
+                    Loading thread...
+                  </div>
+                ) : selectedChat && selectedChat.messages.length > 0 ? (
                   selectedChat.messages.map((message) => (
                     <article
                       className={

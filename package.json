@@ -18,5 +18,10 @@
   "devDependencies": {
     "drizzle-kit": "^0.31.4",
     "typescript": "^5.8.3"
+  },
+  "overrides": {
+    "@esbuild-kit/core-utils": {
+      "esbuild": "^0.25.12"
+    }
   }
 }
