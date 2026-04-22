@@ -2,6 +2,10 @@
 
 A local-first creative studio for generating text, images, and videos through [OpenRouter](https://openrouter.ai/).
 
+
+https://github.com/user-attachments/assets/935922ff-9cf6-4fa9-82ed-7ea76ba7feba
+
+
 ## Overview
 
 OpenVideoUI is a TypeScript monorepo designed around a project-centered workflow:
