@@ -430,6 +430,24 @@ export async function storeAssetBuffer(input: StoreAssetBufferInput): Promise<St
   return writeStoredAsset(input);
 }
 
+export async function checkAssetStorageAccess() {
+  const root = getStorageRoot();
+  await mkdir(root, { recursive: true });
+  const tempPath = path.join(root, `.health-${randomUUID()}.tmp`);
+
+  try {
+    await writeFile(tempPath, "ok", { flag: "wx" });
+    const fileStats = await stat(tempPath);
+
+    return {
+      writable: true,
+      bytesWritten: fileStats.size
+    };
+  } finally {
+    await unlink(tempPath).catch(() => undefined);
+  }
+}
+
 function resolveStoredAssetPath(storageKey: string): StoredAssetPath {
   if (!STORAGE_KEY_PATTERN.test(storageKey) || path.basename(storageKey) !== storageKey) {
     throw new Error("Invalid storage key.");

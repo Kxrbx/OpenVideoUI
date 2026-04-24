@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import {
   getGalleryRendersForUser,
+  getPromptPresetsForUser,
   getProjectsForUser,
   getRecentRendersForUser,
   getTextChatsForUser
@@ -15,11 +16,12 @@ export default async function HomePage() {
     redirect("/sign-in");
   }
 
-  const [projects, recentRenders, galleryRenders, textChats] = await Promise.all([
+  const [projects, recentRenders, galleryRenders, textChats, promptPresets] = await Promise.all([
     getProjectsForUser(session.id),
     getRecentRendersForUser(session.id),
     getGalleryRendersForUser(session.id),
-    getTextChatsForUser(session.id)
+    getTextChatsForUser(session.id),
+    getPromptPresetsForUser({ ownerId: session.id })
   ]);
 
   const chatSessions = textChats.map((chat) => ({
@@ -31,6 +33,12 @@ export default async function HomePage() {
   return (
     <StudioApp
       initialChatSessions={chatSessions}
+      initialPromptPresets={promptPresets.map((preset) => ({
+        ...preset,
+        mode: preset.mode as "image" | "video" | "text",
+        createdAt: preset.createdAt.toISOString(),
+        updatedAt: preset.updatedAt.toISOString()
+      }))}
       galleryRenders={galleryRenders}
       projects={projects}
       recentRenders={recentRenders}

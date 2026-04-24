@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createOpenRouterClient } from "@openvideoui/openrouter";
+import { normalizeOpenRouterError } from "@openvideoui/shared";
 import { requireSession } from "@/lib/api-auth";
+import { generateTitleFromPrompt } from "@/lib/generated-title";
 import { getOpenRouterApiKey } from "@/lib/openrouter-key";
 
 type TextRenderRequest = {
@@ -11,6 +13,8 @@ type TextRenderRequest = {
     role: "system" | "user" | "assistant";
     content: string;
   }>;
+  generateTitle?: boolean;
+  titleModelId?: string;
 };
 
 export async function POST(request: NextRequest) {
@@ -32,6 +36,16 @@ export async function POST(request: NextRequest) {
 
   try {
     const client = createOpenRouterClient({ apiKey });
+    const titlePromise =
+      body.generateTitle === true
+        ? generateTitleFromPrompt({
+            apiKey,
+            prompt: body.prompt,
+            enabled: true,
+            fallback: "Untitled chat",
+            modelId: body.titleModelId
+          })
+        : Promise.resolve<string | null>(null);
     const response = await client.generateText({
       model: body.modelId,
       prompt: body.prompt,
@@ -39,6 +53,7 @@ export async function POST(request: NextRequest) {
     });
 
     const text = response.choices[0]?.message?.content ?? "";
+    const generatedTitle = await titlePromise;
 
     return NextResponse.json({
       data: {
@@ -46,13 +61,21 @@ export async function POST(request: NextRequest) {
         modelId: body.modelId,
         prompt: body.prompt,
         text,
+        generatedTitle,
         providerResponse: response
       }
     });
   } catch (error) {
+    const normalizedError = normalizeOpenRouterError(
+      error,
+      "openrouter_text_submission_failed",
+      "Text generation failed."
+    );
+
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Text generation failed."
+        code: normalizedError.code,
+        error: normalizedError.message
       },
       { status: 502 }
     );

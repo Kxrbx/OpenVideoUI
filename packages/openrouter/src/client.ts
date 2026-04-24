@@ -86,6 +86,8 @@ export class OpenRouterClient {
     model: string;
     prompt?: string;
     messages?: OpenRouterChatMessage[];
+    maxTokens?: number;
+    temperature?: number;
   }) {
     const messages =
       input.messages && input.messages.length > 0
@@ -104,6 +106,8 @@ export class OpenRouterClient {
       body: {
         model: input.model,
         messages,
+        max_tokens: input.maxTokens,
+        temperature: input.temperature,
         stream: false
       }
     });

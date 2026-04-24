@@ -5,6 +5,7 @@ import {
 } from "@openvideoui/database";
 import { createOpenRouterClient } from "@openvideoui/openrouter";
 import { storeAsset } from "@openvideoui/storage";
+import { normalizeOpenRouterError } from "@openvideoui/shared";
 import { requireSession } from "@/lib/api-auth";
 import { getOpenRouterApiKey } from "@/lib/openrouter-key";
 
@@ -88,11 +89,20 @@ export async function POST(_request: NextRequest, context: RouteContext) {
       updatedRender = await syncVideoRenderFromProvider(render.id, status);
     }
 
-    return NextResponse.json({ data: updatedRender });
+    const detailedRender = await getRenderForUser(render.id, session.id);
+
+    return NextResponse.json({ data: detailedRender ?? updatedRender });
   } catch (error) {
+    const normalizedError = normalizeOpenRouterError(
+      error,
+      "provider_poll_failed",
+      "Video polling failed."
+    );
+
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : "Video polling failed."
+        code: normalizedError.code,
+        error: normalizedError.message
       },
       { status: 502 }
     );

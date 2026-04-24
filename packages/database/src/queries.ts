@@ -1,4 +1,4 @@
-import { and, asc, count, desc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, gt, inArray, isNotNull, lt, sql } from "drizzle-orm";
 import { randomUUID } from "node:crypto";
 import type {
   OpenRouterModel,
@@ -13,7 +13,9 @@ import {
   type NewRenderInputAsset,
   type NewRenderOutputAsset,
   type NewRender,
+  type NewPromptPreset,
   modelCapabilities,
+  promptPresets,
   type ProjectWithRenderCount,
   renderEvents,
   renderInputAssets,
@@ -210,6 +212,7 @@ export async function getRecentRendersForUser(userId: string, limit = 8): Promis
       mediaType: renders.mediaType,
       workflowType: renders.workflowType,
       status: renders.status,
+      title: renders.title,
       prompt: renders.prompt,
       negativePrompt: renders.negativePrompt,
       settings: renders.settings,
@@ -250,6 +253,7 @@ export async function getGalleryRendersForUser(
       mediaType: renders.mediaType,
       workflowType: renders.workflowType,
       status: renders.status,
+      title: renders.title,
       prompt: renders.prompt,
       negativePrompt: renders.negativePrompt,
       settings: renders.settings,
@@ -484,6 +488,83 @@ export async function deleteTextChatForUser(input: {
   return true;
 }
 
+export type PromptPresetInput = {
+  title: string;
+  mode: "image" | "video" | "text";
+  workflowType: string;
+  prompt: string;
+  modelId: string;
+  settings?: Record<string, unknown>;
+  tags?: string[];
+};
+
+export async function getPromptPresetsForUser(input: {
+  ownerId: string;
+  mode?: "image" | "video" | "text";
+}) {
+  const db = getDatabaseClient();
+
+  return db.query.promptPresets.findMany({
+    where: input.mode
+      ? and(eq(promptPresets.ownerId, input.ownerId), eq(promptPresets.mode, input.mode))
+      : eq(promptPresets.ownerId, input.ownerId),
+    orderBy: desc(promptPresets.updatedAt)
+  });
+}
+
+export async function createPromptPresetForUser(ownerId: string, input: PromptPresetInput) {
+  const db = getDatabaseClient();
+
+  const [preset] = await db
+    .insert(promptPresets)
+    .values({
+      ownerId,
+      title: input.title,
+      mode: input.mode,
+      workflowType: input.workflowType,
+      prompt: input.prompt,
+      modelId: input.modelId,
+      settings: input.settings ?? {},
+      tags: input.tags ?? []
+    } satisfies NewPromptPreset)
+    .returning();
+
+  return preset;
+}
+
+export async function updatePromptPresetForUser(input: {
+  ownerId: string;
+  presetId: string;
+  values: Partial<PromptPresetInput>;
+}) {
+  const db = getDatabaseClient();
+  const [preset] = await db
+    .update(promptPresets)
+    .set({
+      ...input.values,
+      settings: input.values.settings ?? undefined,
+      tags: input.values.tags ?? undefined,
+      updatedAt: new Date()
+    })
+    .where(and(eq(promptPresets.id, input.presetId), eq(promptPresets.ownerId, input.ownerId)))
+    .returning();
+
+  return preset ?? null;
+}
+
+export async function deletePromptPresetForUser(input: {
+  ownerId: string;
+  presetId: string;
+}) {
+  const db = getDatabaseClient();
+  const deleted = await db
+    .delete(promptPresets)
+    .where(and(eq(promptPresets.id, input.presetId), eq(promptPresets.ownerId, input.ownerId)))
+    .returning({ id: promptPresets.id });
+
+  return deleted.length > 0;
+}
+
 export async function getModelCapabilityById(modelId: string) {
   const db = getDatabaseClient();
 
@@ -499,6 +580,21 @@ export async function listModelCapabilities(providerType?: "image" | "video") {
     where: providerType ? eq(modelCapabilities.providerType, providerType) : undefined,
     orderBy: desc(modelCapabilities.syncedAt)
   });
+}
+
+export async function getModelCapabilityStats() {
+  const db = getDatabaseClient();
+  const [stats] = await db
+    .select({
+      modelCount: count(modelCapabilities.id),
+      latestSyncedAt: sql<Date | null>`max(${modelCapabilities.syncedAt})`
+    })
+    .from(modelCapabilities);
+
+  return {
+    modelCount: Number(stats?.modelCount ?? 0),
+    latestSyncedAt: stats?.latestSyncedAt ?? null
+  };
 }
 
 export async function createRenderRecord(values: Omit<NewRender, "id" | "createdAt" | "updatedAt">) {
@@ -526,6 +622,20 @@ export async function createRenderRecord(values: Omit<NewRender, "id" | "created
   });
 }
 
+export async function updateRenderTitle(renderId: string, title: string) {
+  const db = getDatabaseClient();
+  const [render] = await db
+    .update(renders)
+    .set({
+      title,
+      updatedAt: new Date()
+    })
+    .where(eq(renders.id, renderId))
+    .returning();
+
+  return render ?? null;
+}
+
 export async function getRenderForUser(renderId: string, userId: string) {
   const db = getDatabaseClient();
 
@@ -537,6 +647,7 @@ export async function getRenderForUser(renderId: string, userId: string) {
       mediaType: renders.mediaType,
       workflowType: renders.workflowType,
       status: renders.status,
+      title: renders.title,
       prompt: renders.prompt,
       negativePrompt: renders.negativePrompt,
       settings: renders.settings,
@@ -608,6 +719,20 @@ export async function getPollableVideoRenders(limit = 25) {
       isNotNull(renders.providerJobId)
     ),
     orderBy: desc(renders.updatedAt),
+    limit
+  });
+}
+
+export async function getStaleSubmittingVideoRenders(olderThan: Date, limit = 25) {
+  const db = getDatabaseClient();
+
+  return db.query.renders.findMany({
+    where: and(
+      eq(renders.mediaType, "video"),
+      eq(renders.status, "submitting"),
+      lt(renders.updatedAt, olderThan)
+    ),
+    orderBy: asc(renders.updatedAt),
     limit
   });
 }
@@ -734,6 +859,22 @@ export async function failRender(renderId: string, code: string, message: string
       where: eq(renders.id, renderId)
     });
 
+    if (!existing) {
+      return null;
+    }
+
+    if (
+      existing.status === "failed" &&
+      existing.failureCode === code &&
+      existing.failureMessage === message
+    ) {
+      return existing;
+    }
+
+    if (existing.status === "completed" || existing.status === "canceled") {
+      return existing;
+    }
+
     const [render] = await tx
       .update(renders)
       .set({
@@ -764,6 +905,25 @@ export async function failRender(renderId: string, code: string, message: string
   });
 }
 
+export async function failStaleSubmittingVideoRenders(olderThan: Date, limit = 25) {
+  const staleRenders = await getStaleSubmittingVideoRenders(olderThan, limit);
+  const failed = [];
+
+  for (const render of staleRenders) {
+    const nextRender = await failRender(
+      render.id,
+      "submission_stalled",
+      "Video submission did not reach the provider before the recovery timeout."
+    );
+
+    if (nextRender) {
+      failed.push(nextRender);
+    }
+  }
+
+  return failed;
+}
+
 export async function syncVideoRenderFromProvider(
   renderId: string,
   status: OpenRouterVideoGenerationStatus,
@@ -782,6 +942,14 @@ export async function syncVideoRenderFromProvider(
     const existing = await tx.query.renders.findFirst({
       where: eq(renders.id, renderId)
     });
+
+    if (!existing) {
+      return null;
+    }
+
+    if (existing.status === "completed" || existing.status === "canceled") {
+      return existing;
+    }
 
     const outputUrls =
       persistedOutputs && persistedOutputs.length > 0

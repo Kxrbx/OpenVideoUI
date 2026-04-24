@@ -197,6 +197,22 @@ Run type checks across all workspaces:
 npm run typecheck
 ```
 
+Run unit tests:
+
+```powershell
+npm test
+```
+
+Check local setup health:
+
+```powershell
+npm run doctor
+```
+
+The doctor command checks Node.js, environment shape, service reachability, storage access,
+migration files, and model sync readiness. Warnings are expected when Postgres, Redis, or a
+server-side OpenRouter key are intentionally not available in the current shell.
+
 ## Architecture
 
 ### Web Application

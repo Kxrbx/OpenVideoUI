@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listModelCapabilities } from "@openvideoui/database";
+import { supportsImageGuidedVideo } from "@openvideoui/shared";
 import { requireSession } from "@/lib/api-auth";
 
 const ROUTER_MODEL_PRIORITY = new Map<string, number>([
@@ -55,6 +56,7 @@ export async function GET(request: NextRequest) {
       generateAudio: model.generateAudio,
       supportsImageToVideo: model.supportedFrameImages.length > 0,
       supportsReferenceImages: model.allowedPassthroughParameters.includes("input_references"),
+      supportsImageGuidance: supportsImageGuidedVideo(model),
       pricingPrompt:
         typeof model.rawPayload?.pricing === "object" &&
         model.rawPayload?.pricing &&

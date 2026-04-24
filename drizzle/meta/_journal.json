@@ -50,6 +50,20 @@
       "when": 1776862315191,
       "tag": "0006_big_clea",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1776906057995,
+      "tag": "0007_uneven_slayback",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1776910505027,
+      "tag": "0008_ordinary_violations",
+      "breakpoints": true
     }
   ]
 }

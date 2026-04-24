@@ -4,11 +4,15 @@ import {
   createRenderRecord,
   failRender,
   getModelCapabilityById,
-  getProjectForUser
+  getProjectForUser,
+  updateRenderTitle
 } from "@openvideoui/database";
 import { createOpenRouterClient } from "@openvideoui/openrouter";
+import type { OpenRouterImageGenerationResponse } from "@openvideoui/openrouter";
 import { storeAsset } from "@openvideoui/storage";
+import { buildFallbackTitle, getErrorMessage, normalizeOpenRouterError } from "@openvideoui/shared";
 import { requireSession } from "@/lib/api-auth";
+import { generateTitleFromPrompt } from "@/lib/generated-title";
 import { getOpenRouterApiKey } from "@/lib/openrouter-key";
 
 type ImageRenderRequest = {
@@ -18,6 +22,8 @@ type ImageRenderRequest = {
   prompt: string;
   modalities?: string[];
   imageConfig?: Record<string, unknown>;
+  generateTitle?: boolean;
+  titleModelId?: string;
 };
 
 export async function POST(request: NextRequest) {
@@ -56,6 +62,13 @@ export async function POST(request: NextRequest) {
       : capability.outputModalities.includes("text")
         ? ["image", "text"]
         : ["image"];
+  const fallbackTitle = buildFallbackTitle(body.prompt);
+  const titlePromise = generateTitleFromPrompt({
+    apiKey,
+    prompt: body.prompt,
+    enabled: body.generateTitle ?? true,
+    modelId: body.titleModelId
+  });
 
   const render = await createRenderRecord({
     projectId: project.id,
@@ -63,6 +76,7 @@ export async function POST(request: NextRequest) {
     mediaType: "image",
     workflowType: "text-to-image",
     status: "processing",
+    title: fallbackTitle,
     prompt: body.prompt,
     negativePrompt: null,
     settings: {
@@ -88,15 +102,32 @@ export async function POST(request: NextRequest) {
     failedAt: null
   });
 
+  const client = createOpenRouterClient({ apiKey });
+  let response: OpenRouterImageGenerationResponse;
+
   try {
-    const client = createOpenRouterClient({ apiKey });
-    const response = await client.generateImage({
+    response = await client.generateImage({
       model: body.modelId,
       prompt: body.prompt,
       modalities,
       imageConfig: body.imageConfig
     });
+  } catch (error) {
+    const normalizedError = normalizeOpenRouterError(
+      error,
+      "openrouter_image_submission_failed",
+      "Image generation failed."
+    );
+    const failedRender = await failRender(
+      render.id,
+      normalizedError.code,
+      normalizedError.message
+    );
 
+    return NextResponse.json({ data: failedRender }, { status: 502 });
+  }
+
+  try {
     const outputUrls =
       response.choices.flatMap((choice) =>
         choice.message.images?.map((image) => image.image_url.url) ?? []
@@ -120,15 +151,20 @@ export async function POST(request: NextRequest) {
       (response.usage ?? null) as Record<string, unknown> | undefined,
       storedOutputs
     );
+    const generatedTitle = await titlePromise;
+    const titledRender =
+      generatedTitle !== completedRender.title
+        ? await updateRenderTitle(render.id, generatedTitle)
+        : completedRender;
 
-    return NextResponse.json({ data: completedRender }, { status: 201 });
+    return NextResponse.json({ data: titledRender ?? completedRender }, { status: 201 });
   } catch (error) {
     const failedRender = await failRender(
       render.id,
-      "openrouter_image_error",
-      error instanceof Error ? error.message : "Image generation failed."
+      "asset_storage_error",
+      getErrorMessage(error, "Generated image storage failed.")
     );
 
-    return NextResponse.json({ data: failedRender }, { status: 502 });
+    return NextResponse.json({ data: failedRender }, { status: 500 });
   }
 }

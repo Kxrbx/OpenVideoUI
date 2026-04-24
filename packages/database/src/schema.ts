@@ -64,6 +64,7 @@ export const renders = pgTable(
     mediaType: mediaTypeEnum("media_type").notNull(),
     workflowType: workflowTypeEnum("workflow_type").notNull(),
     status: renderStatusEnum("status").notNull(),
+    title: varchar("title", { length: 180 }),
     prompt: text("prompt").notNull(),
     negativePrompt: text("negative_prompt"),
     settings: jsonb("settings").$type<Record<string, unknown>>().notNull(),
@@ -118,6 +119,29 @@ export const textChats = pgTable(
   },
   (table) => [
     index("text_chats_project_updated_idx").on(table.projectId, table.updatedAt)
+  ]
+);
+
+export const promptPresets = pgTable(
+  "prompt_presets",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    ownerId: uuid("owner_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    title: varchar("title", { length: 180 }).notNull(),
+    mode: varchar("mode", { length: 32 }).notNull(),
+    workflowType: varchar("workflow_type", { length: 64 }).notNull(),
+    prompt: text("prompt").notNull(),
+    modelId: varchar("model_id", { length: 255 }).notNull(),
+    settings: jsonb("settings").$type<Record<string, unknown>>().notNull(),
+    tags: jsonb("tags").$type<string[]>().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull()
+  },
+  (table) => [
+    index("prompt_presets_owner_mode_updated_idx").on(table.ownerId, table.mode, table.updatedAt),
+    index("prompt_presets_owner_updated_idx").on(table.ownerId, table.updatedAt)
   ]
 );
 
@@ -187,7 +211,8 @@ export const renderEvents = pgTable("render_events", {
 
 export const usersRelations = relations(users, ({ many }) => ({
   projects: many(projects),
-  sessions: many(sessions)
+  sessions: many(sessions),
+  promptPresets: many(promptPresets)
 }));
 
 export const projectsRelations = relations(projects, ({ one, many }) => ({
@@ -223,6 +248,13 @@ export const textChatsRelations = relations(textChats, ({ one }) => ({
   })
 }));
 
+export const promptPresetsRelations = relations(promptPresets, ({ one }) => ({
+  owner: one(users, {
+    fields: [promptPresets.ownerId],
+    references: [users.id]
+  })
+}));
+
 export const renderInputAssetsRelations = relations(renderInputAssets, ({ one }) => ({
   render: one(renders, {
     fields: [renderInputAssets.renderId],
@@ -254,6 +286,8 @@ export type Session = typeof sessions.$inferSelect;
 export type NewSession = typeof sessions.$inferInsert;
 export type TextChat = typeof textChats.$inferSelect;
 export type NewTextChat = typeof textChats.$inferInsert;
+export type PromptPreset = typeof promptPresets.$inferSelect;
+export type NewPromptPreset = typeof promptPresets.$inferInsert;
 export type ModelCapability = typeof modelCapabilities.$inferSelect;
 export type NewModelCapability = typeof modelCapabilities.$inferInsert;
 export type RenderInputAsset = typeof renderInputAssets.$inferSelect;

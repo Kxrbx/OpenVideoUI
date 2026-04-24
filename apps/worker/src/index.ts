@@ -1,4 +1,5 @@
 import {
+  failStaleSubmittingVideoRenders,
   getRenderById,
   getPollableVideoRenders,
   syncOpenRouterModelCapabilities,
@@ -19,6 +20,7 @@ const POLL_INTERVAL_MS = 15_000;
 const RETRY_DELAY_MS = 30_000;
 const MAX_CLAIMS_PER_CYCLE = 8;
 const MAX_RENDER_POLL_CONCURRENCY = 4;
+const SUBMISSION_STALE_AFTER_MS = 10 * 60 * 1000;
 let queue = createRenderQueueClient();
 
 function logStartup() {
@@ -150,6 +152,8 @@ async function pollInFlightVideoRenders() {
     return;
   }
 
+  await failStaleSubmittingRenders();
+
   if (!queue) {
     await pollInFlightVideoRendersFallback();
     return;
@@ -166,6 +170,23 @@ async function pollInFlightVideoRenders() {
   console.log(`[worker] queue poll cycle - claimed ${claimedIds.length} render(s)`);
 
   await runWithConcurrency(claimedIds, MAX_RENDER_POLL_CONCURRENCY, processClaimedRender);
+}
+
+async function failStaleSubmittingRenders() {
+  const olderThan = new Date(Date.now() - SUBMISSION_STALE_AFTER_MS);
+
+  try {
+    const failed = await failStaleSubmittingVideoRenders(olderThan, 25);
+
+    if (failed.length > 0) {
+      console.warn(`[worker] marked ${failed.length} stale video submission(s) as failed`);
+    }
+  } catch (error) {
+    console.error(
+      "[worker] stale submission recovery failed",
+      error instanceof Error ? error.message : error
+    );
+  }
 }
 
 async function processClaimedRender(renderId: string) {

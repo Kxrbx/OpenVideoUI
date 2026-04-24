@@ -17,12 +17,22 @@ export type RenderQueueClient = {
   connect: () => Promise<void>;
   disconnect: () => Promise<void>;
   markHeartbeat: () => Promise<void>;
+  getWorkerHeartbeats: () => Promise<WorkerHeartbeat[]>;
   enqueueRenderPoll: (renderId: string, delayMs?: number) => Promise<void>;
   enqueueRenderPolls: (renderIds: string[], delayMs?: number) => Promise<void>;
   claimDueRenderIds: (limit?: number, lockSeconds?: number) => Promise<string[]>;
   releaseRenderClaim: (renderId: string, nextDelayMs?: number) => Promise<void>;
   completeRender: (renderId: string) => Promise<void>;
 };
+
+export type WorkerHeartbeat = {
+  workerId: string;
+  updatedAt: string;
+};
+
+export function getLatestWorkerHeartbeat(heartbeats: WorkerHeartbeat[]) {
+  return [...heartbeats].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] ?? null;
+}
 
 function getClient(url?: string): RedisClientType | null {
   const env = readRuntimeEnv();
@@ -73,6 +83,23 @@ export function createRenderQueueClient(redisUrl?: string): RenderQueueClient | 
           value: 90
         }
       });
+    },
+    async getWorkerHeartbeats() {
+      const keys = await redisClient.keys(`${HEARTBEAT_PREFIX}*`);
+
+      if (keys.length === 0) {
+        return [];
+      }
+
+      const values = await redisClient.mGet(keys);
+
+      return keys
+        .map((key, index) => ({
+          workerId: key.slice(HEARTBEAT_PREFIX.length),
+          updatedAt: values[index] ?? ""
+        }))
+        .filter((heartbeat) => heartbeat.workerId && heartbeat.updatedAt)
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     },
     async enqueueRenderPoll(renderId: string, delayMs = 0) {
       await redisClient.zAdd(POLL_QUEUE_KEY, [

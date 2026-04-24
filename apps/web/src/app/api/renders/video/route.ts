@@ -5,12 +5,20 @@ import {
   getModelCapabilityById,
   getProjectForUser,
   updateRenderAfterVideoSubmission,
-  failRender
+  failRender,
+  updateRenderTitle
 } from "@openvideoui/database";
 import { createOpenRouterClient } from "@openvideoui/openrouter";
 import { createRenderQueueClient } from "@openvideoui/queue";
 import { storeAsset } from "@openvideoui/storage";
+import {
+  buildFallbackTitle,
+  getErrorMessage,
+  normalizeOpenRouterError,
+  supportsImageGuidedVideo
+} from "@openvideoui/shared";
 import { requireSession } from "@/lib/api-auth";
+import { generateTitleFromPrompt } from "@/lib/generated-title";
 import { getOpenRouterApiKey } from "@/lib/openrouter-key";
 
 type VideoRenderRequest = {
@@ -24,6 +32,8 @@ type VideoRenderRequest = {
   generateAudio?: boolean;
   frameImages?: Array<{ type: string; imageUrl: string; frameType: string }>;
   inputReferences?: Array<{ type?: string; imageUrl: string }>;
+  generateTitle?: boolean;
+  titleModelId?: string;
 };
 
 function getSourceType(url: string) {
@@ -63,11 +73,7 @@ export async function POST(request: NextRequest) {
   const isImageToVideo = Boolean(body.frameImages?.length || body.inputReferences?.length);
   const workflowType = isImageToVideo ? "image-to-video" : "text-to-video";
 
-  if (
-    isImageToVideo &&
-    capability.supportedFrameImages.length === 0 &&
-    !capability.allowedPassthroughParameters.includes("input_references")
-  ) {
+  if (isImageToVideo && !supportsImageGuidedVideo(capability)) {
     return NextResponse.json(
       { error: "Selected model does not support image-guided video generation." },
       { status: 400 }
@@ -95,6 +101,13 @@ export async function POST(request: NextRequest) {
       }
     }))
   };
+  const fallbackTitle = buildFallbackTitle(body.prompt);
+  const titlePromise = generateTitleFromPrompt({
+    apiKey,
+    prompt: body.prompt,
+    enabled: body.generateTitle ?? true,
+    modelId: body.titleModelId
+  });
 
   const render = await createRenderRecord({
     projectId: project.id,
@@ -102,6 +115,7 @@ export async function POST(request: NextRequest) {
     mediaType: "video",
     workflowType,
     status: "submitting",
+    title: fallbackTitle,
     prompt: body.prompt,
     negativePrompt: null,
     settings: {
@@ -124,62 +138,72 @@ export async function POST(request: NextRequest) {
     failedAt: null
   });
 
-  const storedFrameImages = await Promise.all(
-    (body.frameImages ?? []).map(async (image, index) => {
-      const stored = await storeAsset({
-        renderId: render.id,
-        mediaType: "image",
-        source: image.imageUrl,
-        sourceKind: "reference",
-        fileNameHint: `frame-${index + 1}.png`
-      });
+  try {
+    const storedFrameImages = await Promise.all(
+      (body.frameImages ?? []).map(async (image, index) => {
+        const stored = await storeAsset({
+          renderId: render.id,
+          mediaType: "image",
+          source: image.imageUrl,
+          sourceKind: "reference",
+          fileNameHint: `frame-${index + 1}.png`
+        });
 
-      return {
-        role: image.frameType || "frame",
-        assetType: "image",
-        sourceType: getSourceType(image.imageUrl),
-        fileName: stored.fileName,
-        mimeType: stored.mimeType,
-        sourceUrl: stored.publicUrl,
-        storageKey: stored.storageKey,
-        metadata: {
-          index,
-          type: image.type,
-          frameType: image.frameType,
-          originalSourceType: getSourceType(image.imageUrl)
-        }
-      };
-    })
-  );
-  const storedReferences = await Promise.all(
-    (body.inputReferences ?? []).map(async (image, index) => {
-      const stored = await storeAsset({
-        renderId: render.id,
-        mediaType: "image",
-        source: image.imageUrl,
-        sourceKind: "reference",
-        fileNameHint: `reference-${index + 1}.png`
-      });
+        return {
+          role: image.frameType || "frame",
+          assetType: "image",
+          sourceType: getSourceType(image.imageUrl),
+          fileName: stored.fileName,
+          mimeType: stored.mimeType,
+          sourceUrl: stored.publicUrl,
+          storageKey: stored.storageKey,
+          metadata: {
+            index,
+            type: image.type,
+            frameType: image.frameType,
+            originalSourceType: getSourceType(image.imageUrl)
+          }
+        };
+      })
+    );
+    const storedReferences = await Promise.all(
+      (body.inputReferences ?? []).map(async (image, index) => {
+        const stored = await storeAsset({
+          renderId: render.id,
+          mediaType: "image",
+          source: image.imageUrl,
+          sourceKind: "reference",
+          fileNameHint: `reference-${index + 1}.png`
+        });
 
-      return {
-        role: image.type || "reference",
-        assetType: "image",
-        sourceType: getSourceType(image.imageUrl),
-        fileName: stored.fileName,
-        mimeType: stored.mimeType,
-        sourceUrl: stored.publicUrl,
-        storageKey: stored.storageKey,
-        metadata: {
-          index,
-          type: image.type ?? null,
-          originalSourceType: getSourceType(image.imageUrl)
-        }
-      };
-    })
-  );
+        return {
+          role: image.type || "reference",
+          assetType: "image",
+          sourceType: getSourceType(image.imageUrl),
+          fileName: stored.fileName,
+          mimeType: stored.mimeType,
+          sourceUrl: stored.publicUrl,
+          storageKey: stored.storageKey,
+          metadata: {
+            index,
+            type: image.type ?? null,
+            originalSourceType: getSourceType(image.imageUrl)
+          }
+        };
+      })
+    );
 
-  if (storedFrameImages.length > 0 || storedReferences.length > 0) {
-    await attachRenderInputAssets(render.id, [...storedFrameImages, ...storedReferences]);
+    if (storedFrameImages.length > 0 || storedReferences.length > 0) {
+      await attachRenderInputAssets(render.id, [...storedFrameImages, ...storedReferences]);
+    }
+  } catch (error) {
+    const failedRender = await failRender(
+      render.id,
+      "input_asset_storage_error",
+      getErrorMessage(error, "Reference image storage failed.")
+    );
+
+    return NextResponse.json({ data: failedRender }, { status: 500 });
   }
 
   try {
@@ -207,12 +231,23 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    return NextResponse.json({ data: updatedRender }, { status: 202 });
+    const generatedTitle = await titlePromise;
+    const titledRender =
+      updatedRender && generatedTitle !== updatedRender.title
+        ? await updateRenderTitle(render.id, generatedTitle)
+        : updatedRender;
+
+    return NextResponse.json({ data: titledRender ?? updatedRender }, { status: 202 });
   } catch (error) {
+    const normalizedError = normalizeOpenRouterError(
+      error,
+      "openrouter_video_submission_failed",
+      "Video generation submission failed."
+    );
     const failedRender = await failRender(
       render.id,
-      "openrouter_video_error",
-      error instanceof Error ? error.message : "Video generation submission failed."
+      normalizedError.code,
+      normalizedError.message
     );
 
     return NextResponse.json({ data: failedRender }, { status: 502 });

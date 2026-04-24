@@ -10,6 +10,8 @@ Describe the purpose of this pull request.
 
 - [ ] `npm run build:web`
 - [ ] `npm run typecheck`
+- [ ] `npm test`
+- [ ] `npm run doctor`
 - [ ] Manual test completed
 
 ## Notes
